@@ -141,6 +141,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
   semi-annual / annual), asset-specific transaction costs (see below). Compared with SPY and the
   profile benchmark: annualised return, volatility, Sharpe, max drawdown. It must compare the
   **ex-ante volatility promised** at each rebalancing with the **realised volatility**.
+- **Equal-weight benchmark, same universe** (`run_equal_weight`), one per profile: at each
+  rebalancing equal weights on the eligible stocks (same 60-month rule, hence the same
+  survivors) for 1 - floor, and equal weights on the eligible bond funds (cash equivalents
+  excluded) for the profile's bond floor; same dates, drift and per-asset costs as the strategy.
+  It has the same survivorship bias, so the gap to the strategy measures what the optimisation
+  adds. Shown in every backtest table and chart, with a plain-language "How to read these
+  results" box for the client.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks) of the client's
   wealth over 5-20 years: median, 5% and 95% paths, versus the benchmark.
 

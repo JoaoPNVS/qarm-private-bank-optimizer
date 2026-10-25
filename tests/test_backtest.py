@@ -141,3 +141,23 @@ def test_cost_penalty_reduces_trading(inputs, estimates):
     without = btm.run_backtest(ret, rf, uni, cons, estimates=estimates, penalize_costs=False)
     assert btm.annual_turnover(with_penalty) < btm.annual_turnover(without)
     assert btm.annual_cost(with_penalty) < btm.annual_cost(without)
+
+
+@pytest.mark.parametrize("profile", ["Balanced", "Dynamic"])
+def test_equal_weight_same_universe(inputs, estimates, profile):
+    uni, ret, rf = inputs
+    floor = prof.SPECS[profile].min_bonds
+    ew = btm.run_equal_weight(ret, uni, floor)
+    strat = btm.run_backtest(ret, rf, uni, prof.default_constraints(profile), estimates=estimates)
+    assert ew.returns.index.equals(strat.returns.index) and list(ew.rebalances.index) == list(strat.rebalances.index)
+    for t in ew.rebalances.index:
+        w = ew.weights.loc[t]
+        held = w[w > 0]
+        eligible = set(estimates[t].mu.index)
+        stocks = [x for x in held.index if uni.at[x, "vehicle"] == "Stock"]
+        bonds = [x for x in held.index if uni.at[x, "asset_class"] == "Bond"]
+        assert set(held.index) <= eligible and len(stocks) + len(bonds) == len(held)  # no cash, no gold, no EM ETF
+        assert {x for x in eligible if uni.at[x, "vehicle"] == "Stock"} == set(stocks)  # every eligible survivor
+        assert np.allclose(held[stocks], (1 - floor) / len(stocks))
+        assert np.isclose(held[bonds].sum(), floor) and (not bonds or np.allclose(held[bonds], floor / len(bonds)))
+    assert ew.rebalances["cost"].iloc[0] > 0 and np.isclose(ew.rebalances["turnover"].iloc[0], 1)

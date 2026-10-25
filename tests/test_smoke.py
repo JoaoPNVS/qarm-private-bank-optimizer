@@ -61,7 +61,7 @@ def test_backtest_benchmark_follows_the_profile():
         at.run(timeout=TIMEOUT)
         m = backtest_metrics(at)
         assert list(m.index)[0] == "Strategy" and list(m.index)[-1] == "SPY"
-        rows[p] = m.iloc[1]
+        rows[p] = m.iloc[2]
         spy = m.loc["SPY"]
     vols = [rows[p]["Volatility"] for p in rows]
     rets = [rows[p]["Annual return"] for p in rows]
@@ -193,7 +193,7 @@ def test_changes_propagate_no_stale_cache():
     at.run(timeout=TIMEOUT)
     r1, m1 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
     assert r1 != r0 and m1.loc["Strategy", "Annual return"] != m0.loc["Strategy", "Annual return"]
-    assert np.isclose(m1.iloc[1]["Annual return"], m0.iloc[1]["Annual return"])  # benchmark unaffected
+    assert np.isclose(m1.iloc[2]["Annual return"], m0.iloc[2]["Annual return"])  # benchmark unaffected
     at.selectbox(key="bt.freq").set_value("Annual")
     at.run(timeout=TIMEOUT)
     assert backtest_metrics(at).loc["Strategy", "Turnover p.a."] < m1.loc["Strategy", "Turnover p.a."]
@@ -210,3 +210,11 @@ def test_bond_portfolio_section():
     at = run_app({("selectbox", "profile"): "Dynamic"})
     # no bond floor and negative expected bond returns: Dynamic holds no bonds today
     assert any("No bonds in this portfolio" in i.value for i in at.info)
+
+
+def test_backtest_shows_equal_weight_and_how_to_read():
+    at = run_app()
+    m = backtest_metrics(at)
+    assert list(m.index) == ["Strategy", "Equal weight (same universe)", "Benchmark (60% SPY / 40% AGG)", "SPY"]
+    assert m.loc["Equal weight (same universe)", "Turnover p.a."] > 0 and m.loc["Strategy", "Trading costs p.a."] > 0
+    assert any("How to read these results" in md.value for md in at.markdown)

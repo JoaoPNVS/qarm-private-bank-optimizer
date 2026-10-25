@@ -18,6 +18,10 @@ months in 2012-01, so every profile starts at the 2012-01-31 rebalancing, with r
 2012-02. Rebalancing dates are every 3, 6 or 12 months from the start (semi-annual and annual
 dates are subsets of the quarterly ones).
 
+Equal-weight benchmark (`run_equal_weight`): same universe, same eligibility (hence the same
+survivorship bias), same dates and costs, equal weights on stocks and bond funds split by the
+profile's bond floor.
+
 Ex-ante versus realised risk: each rebalancing records the volatility promised by the
 optimiser; the realised volatility is the annualised volatility of the strategy over the next 12
 months (NaN when fewer than 12 months remain).
@@ -66,44 +70,28 @@ def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
             for d in dates}
 
 
-def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
-                 constraints: list[opt.Constraint], freq: str = "Quarterly", tc: pd.Series | None = None,
-                 start: pd.Timestamp = DEFAULT_START, window: int = est.DEFAULT_WINDOW,
-                 estimates: dict | None = None, penalize_costs: bool = True) -> BacktestResult:
-    """tc: cost per unit traded for each asset (default: universe tc_bps / 1e4)."""
-    rebals = rebalance_dates(returns.index, start, freq)
-    estimates = estimates or {}
+def _simulate(returns: pd.DataFrame, universe: pd.DataFrame, rebals: list[pd.Timestamp], tc: pd.Series,
+              target_at, name: str) -> BacktestResult:
+    """Shared engine: at each rebalancing `target_at(t, w_drifted, invested)` returns
+    (target weights or None, info dict, message); weights drift between rebalancings and each
+    trade pays sum_i c_i |target_i - drifted_i| on the following month."""
     tickers = list(returns.columns)
-    tc = (universe["tc_bps"] / 1e4 if tc is None else tc).reindex(tickers).fillna(0.0)
     months = returns.index[returns.index >= rebals[0]]
     w = pd.Series(0.0, index=tickers)
     w_rows, ret_rows, reb_rows, events = {}, {}, [], []
     pending_cost, invested = 0.0, False
-
     for i, t in enumerate(months):
         if t in rebals:
-            e = estimates.get(t) or est.estimate(est.estimation_window(returns, t, window), rf,
-                                                 est.shrinkage_groups(universe))
-            d = opt.ProblemData(e.mu, e.cov, universe, w_prev=w if invested else None,
-                                tc=tc if penalize_costs else 0.0)
-            res = opt.solve(d, constraints, diagnose=not invested)
-            if res.ok:
-                target = res.weights.reindex(tickers).fillna(0.0)
-                turnover = float((target - w).abs().sum())
+            target, info, message = target_at(t, w, invested)
+            if target is not None:
+                target = target.reindex(tickers).fillna(0.0)
                 pending_cost = float(tc @ (target - w).abs())
-                reb_rows.append({"date": t, "status": "ok", "expected_return": res.expected_return,
-                                 "ex_ante_vol": res.volatility, "turnover": turnover, "cost": pending_cost,
-                                 "initial": not invested, "n_positions": int((target > 0.005).sum()),
-                                 "n_eligible": len(e.mu)})
+                reb_rows.append({"date": t, "status": "ok", "turnover": float((target - w).abs().sum()),
+                                 "cost": pending_cost, "initial": not invested,
+                                 "n_positions": int((target > 0.005).sum()), **info})
                 w, invested = target, True
-            elif not invested:
-                n_bonds = int((universe["asset_class"].reindex(e.mu.index) == "Bond").sum())
-                raise BacktestError(
-                    f"Constraints are infeasible at the first rebalancing ({t:%B %Y}). At that date only "
-                    f"{len(e.mu)} assets, including {n_bonds} bond funds, had {window} months of history, "
-                    f"so settings that work today may not work then. {res.message}")
             else:
-                events.append(f"{t:%Y-%m}: rebalancing skipped, weights kept ({res.message})")
+                events.append(f"{t:%Y-%m}: rebalancing skipped, weights kept ({message})")
                 reb_rows.append({"date": t, "status": "skipped", "turnover": 0.0, "cost": 0.0, "initial": False})
         w_rows[t] = w.copy()
         if i + 1 < len(months):
@@ -113,13 +101,70 @@ def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
             ret_rows[nxt] = (1 + gross) * (1 - pending_cost) - 1
             pending_cost = 0.0
             w = w * (1 + r) / (1 + gross)
-
-    strat = pd.Series(ret_rows, name="Strategy").sort_index()
+    out = pd.Series(ret_rows, name=name).sort_index()
     reb = pd.DataFrame(reb_rows).set_index("date")
     reb["realised_vol"] = [
-        strat.loc[strat.index > t].head(REALISED_HORIZON).std() * np.sqrt(12)
-        if (strat.index > t).sum() >= REALISED_HORIZON else np.nan for t in reb.index]
-    return BacktestResult(strat, pd.DataFrame(w_rows).T, reb, events)
+        out.loc[out.index > t].head(REALISED_HORIZON).std() * np.sqrt(12)
+        if (out.index > t).sum() >= REALISED_HORIZON else np.nan for t in reb.index]
+    return BacktestResult(out, pd.DataFrame(w_rows).T, reb, events)
+
+
+def _costs(universe: pd.DataFrame, returns: pd.DataFrame, tc: pd.Series | None) -> pd.Series:
+    return (universe["tc_bps"] / 1e4 if tc is None else tc).reindex(returns.columns).fillna(0.0)
+
+
+def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
+                 constraints: list[opt.Constraint], freq: str = "Quarterly", tc: pd.Series | None = None,
+                 start: pd.Timestamp = DEFAULT_START, window: int = est.DEFAULT_WINDOW,
+                 estimates: dict | None = None, penalize_costs: bool = True) -> BacktestResult:
+    """The strategy: re-optimised at each rebalancing. tc: cost per unit traded for each asset
+    (default: universe tc_bps / 1e4)."""
+    rebals = rebalance_dates(returns.index, start, freq)
+    estimates = estimates or {}
+    tc = _costs(universe, returns, tc)
+
+    def target_at(t, w, invested):
+        e = estimates.get(t) or est.estimate(est.estimation_window(returns, t, window), rf,
+                                             est.shrinkage_groups(universe))
+        d = opt.ProblemData(e.mu, e.cov, universe, w_prev=w if invested else None,
+                            tc=tc if penalize_costs else 0.0)
+        res = opt.solve(d, constraints, diagnose=not invested)
+        if res.ok:
+            return res.weights, {"expected_return": res.expected_return, "ex_ante_vol": res.volatility,
+                                 "n_eligible": len(e.mu)}, ""
+        if not invested:
+            n_bonds = int((universe["asset_class"].reindex(e.mu.index) == "Bond").sum())
+            raise BacktestError(
+                f"Constraints are infeasible at the first rebalancing ({t:%B %Y}). At that date only "
+                f"{len(e.mu)} assets, including {n_bonds} bond funds, had {window} months of history, "
+                f"so settings that work today may not work then. {res.message}")
+        return None, {}, res.message
+
+    return _simulate(returns, universe, rebals, tc, target_at, "Strategy")
+
+
+def run_equal_weight(returns: pd.DataFrame, universe: pd.DataFrame, bond_share: float,
+                     freq: str = "Quarterly", tc: pd.Series | None = None, start: pd.Timestamp = DEFAULT_START,
+                     window: int = est.DEFAULT_WINDOW) -> BacktestResult:
+    """Naive benchmark on the SAME universe: at each rebalancing, equal weights on the eligible
+    stocks (same 60-month rule, so the same survivors) for 1 - bond_share, and equal weights on the
+    eligible bond funds (cash equivalents excluded) for bond_share; same dates and same per-asset
+    costs as the strategy. The gap to the strategy measures what the optimisation adds."""
+    rebals = rebalance_dates(returns.index, start, freq)
+    tc = _costs(universe, returns, tc)
+
+    def target_at(t, w, invested):
+        eligible = est.estimation_window(returns, t, window).columns
+        u = universe.loc[eligible]
+        stocks = u.index[u["vehicle"] == "Stock"]
+        bonds = u.index[u["asset_class"] == "Bond"]
+        target = pd.Series(0.0, index=returns.columns)
+        target[stocks] = (1 - bond_share) / len(stocks)
+        if bond_share > 0:
+            target[bonds] = bond_share / len(bonds)
+        return target, {"n_eligible": len(eligible)}, ""
+
+    return _simulate(returns, universe, rebals, tc, target_at, "Equal weight")
 
 
 def annual_cost(result: BacktestResult) -> float:

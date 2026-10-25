@@ -45,6 +45,9 @@ def pct(x: float, digits: int = 1) -> str:
     return f"{x:.{digits}%}"
 
 
+EW_LABEL = "Equal weight (same universe)"
+
+
 def bench_label(profile: str) -> str:
     e = prof.SPECS[profile].benchmark_equity
     return "Benchmark (100% SPY)" if e >= 1 else f"Benchmark ({e:.0%} SPY / {1 - e:.0%} AGG)"
@@ -99,12 +102,13 @@ def run_backtest(profile: str, cons_json: str, freq: str):
     universe, returns, rf, bench = load_data()
     res = btm.run_backtest(returns, rf, universe, build_constraints(profile, json.loads(cons_json)),
                            freq=freq, estimates=backtest_estimates())
+    ew = btm.run_equal_weight(returns, universe, prof.SPECS[profile].min_bonds, freq=freq)
     idx = res.returns.index
-    series = pd.DataFrame({"Strategy": res.returns,
+    series = pd.DataFrame({"Strategy": res.returns, EW_LABEL: ew.returns.reindex(idx),
                            bench_label(profile): bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity,
                                                                              bench).reindex(idx),
                            "SPY": bench["SPY"].reindex(idx)})
-    return res, series
+    return res, ew, series
 
 
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
@@ -382,22 +386,30 @@ with tabs[3], guarded("Backtest"):
     c1, _ = st.columns([1, 3])
     freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
     try:
-        bt, series = run_backtest(profile, cons_json, freq)
+        bt, ew, series = run_backtest(profile, cons_json, freq)
     except EXPECTED_ERRORS as exc:
         st.error(f"The backtest could not run: {exc}")
         bt = None
     if bt is not None:
         start, end = series.index[0], series.index[-1]
-        st.caption(f"{start:%B %Y} – {end:%B %Y} ({len(series) / 12:.1f} years). At each rebalancing the portfolio "
-                   f"is re-optimised on the previous {WINDOW} months only (no look-ahead); weights drift in between. "
-                   "**Survivorship bias:** the stock universe is today's index membership, so the strategy's "
-                   "results are an upper bound; SPY and the benchmark are not affected.")
+        with st.container(border=True):
+            st.markdown("#### How to read these results")
+            st.markdown(
+                f"This is a simulation of the past, {start:%B %Y} – {end:%B %Y} ({len(series) / 12:.1f} years): every "
+                f"{btm.FREQ_MONTHS[freq]} months the portfolio is rebuilt using only the {WINDOW} months of data "
+                "available at that date, and trading costs are deducted. "
+                "The stock list is today's largest US companies, i.e. the ones that succeeded, so any strategy "
+                "picking from it looks better than it really could have been. "
+                f"The **{EW_LABEL}** portfolio buys the same companies naively, in equal amounts: it shares that "
+                "bias, so the gap between it and our strategy measures what the optimisation adds. "
+                "SPY and the profile benchmark are real index funds and are not affected; past results do not "
+                "guarantee future returns.")
         for ev in bt.events:
             st.warning(ev)
         metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
         metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
-        metrics["Turnover p.a."] = [btm.annual_turnover(bt), np.nan, np.nan]
-        metrics["Trading costs p.a."] = [btm.annual_cost(bt), np.nan, np.nan]
+        metrics["Turnover p.a."] = [btm.annual_turnover(bt), btm.annual_turnover(ew), np.nan, np.nan]
+        metrics["Trading costs p.a."] = [btm.annual_cost(bt), btm.annual_cost(ew), np.nan, np.nan]
         st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
                                              "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
             {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
@@ -408,9 +420,10 @@ with tabs[3], guarded("Backtest"):
             st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")
 
         growth = wealth * (1 + series).cumprod()
+        styles = (("Strategy", NAVY, 3, "solid"), (EW_LABEL, "#7f9cb8", 2, "dash"), (bench_label(profile), GREY, 2, "solid"),
+                  ("SPY", ACCENT, 2, "dot"))
         f = go.Figure([go.Scatter(x=growth.index, y=growth[k], name=k, line=dict(color=clr, width=w_, dash=dash))
-                       for k, clr, w_, dash in (("Strategy", NAVY, 3, "solid"), (bench_label(profile), GREY, 2, "solid"),
-                                                ("SPY", ACCENT, 2, "dot"))])
+                       for k, clr, w_, dash in styles])
         f.update_layout(title=f"Growth of {usd(wealth)}", yaxis_title="USD", yaxis_type="log")
         st.plotly_chart(fig_layout(f, 430), width="stretch")
 
@@ -426,8 +439,8 @@ with tabs[3], guarded("Backtest"):
                      f"12 months {reb['realised_vol'].mean():.1%}; realised over the whole backtest "
                      f"{metrics.loc['Strategy', 'volatility']:.1%}.")
         dd = pd.DataFrame({k: risk.drawdowns(series[k]) for k in series}) * 100
-        f = go.Figure([go.Scatter(x=dd.index, y=dd[k], name=k, line=dict(color=clr))
-                       for k, clr in (("Strategy", NAVY), (bench_label(profile), GREY), ("SPY", ACCENT))])
+        f = go.Figure([go.Scatter(x=dd.index, y=dd[k], name=k, line=dict(color=clr, dash=dash))
+                       for k, clr, _, dash in styles])
         f.update_layout(title="Drawdowns", yaxis_title="%")
         right.plotly_chart(fig_layout(f, 380), width="stretch")
 
