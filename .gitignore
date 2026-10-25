@@ -36,3 +36,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Read-only inspiration from a previous project (kept local, not versioned)
+reference/
