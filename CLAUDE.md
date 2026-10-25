@@ -62,8 +62,14 @@ Grading criteria (from the professor) — every feature should serve one of thes
     one share class per company, GICS sector), built once by `scripts/build_universe.py`
     (snapshot date in `data/universe_as_of.txt`);
   - international equity ETFs: Europe, Japan, emerging markets (proposed VGK, EWJ, EEM);
-  - USD bond ETFs by `bond_type`: short-term (SHY), Treasury 7-10y (IEF), corporate investment
-    grade (LQD), high yield (HYG), TIPS (TIP);
+  - a bond sleeve of 15 USD bond ETFs used as market segments (`bond_type`; individual bonds
+    have no free prices): Treasury by maturity BIL (1-3 months), SHY (1-3y), IEI (3-7y),
+    IEF (7-10y), TLT (20y+); corporate investment grade by maturity IGSB (1-5y), IGIB (5-10y),
+    VCLT (10y+); high yield HYG; municipal MUB; agency mortgage-backed MBB; emerging-market
+    USD sovereigns EMB; international USD-hedged BNDX; TIPS (TIP); floating rate FLOT.
+    IGSB/IGIB replace the requested VCSH/VCIT (same segments, history from 2007-02 instead of
+    2009-12). VCLT, BNDX and FLOT have no older equivalent and become eligible only in 2014-11,
+    2018-06 and 2016-06;
   - gold (GLD);
   - CASH_USD, synthetic, earning the 3-month T-bill.
 - **Risk-free**: 3-month T-bill yield `^IRX` (yfinance). Monthly rf_t = IRX_{t-1} / 1200 (rate

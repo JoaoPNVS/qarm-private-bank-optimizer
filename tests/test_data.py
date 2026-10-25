@@ -19,7 +19,7 @@ def returns():
 
 def test_universe_composition(universe):
     counts = universe["asset_class"].value_counts()
-    assert counts["Equity"] == 153 and counts["Bond"] == 5 and counts["Cash"] == 1
+    assert counts["Equity"] == 153 and counts["Bond"] == 15 and counts["Cash"] == 1
     assert (universe["listed_currency"] == "USD").all()             # no currency conversion anywhere
     assert not {"GOOG", "FOX", "NWS"} & set(universe.index)        # one share class per company
     stocks = universe[universe["asset_class"] == "Equity"]
@@ -28,11 +28,15 @@ def test_universe_composition(universe):
 
 def test_fixed_assets_and_tags(universe):
     etfs = universe[universe["vehicle"] == "ETF"]
-    assert set(etfs.index) == {"VGK", "EWJ", "EEM", "SHY", "IEF", "LQD", "HYG", "TIP", "GLD"}
+    bond_etfs = {"BIL", "SHY", "IEI", "IEF", "TLT", "IGSB", "IGIB", "VCLT", "HYG", "MUB", "MBB", "EMB", "BNDX",
+                 "TIP", "FLOT"}
+    assert set(etfs.index) == {"VGK", "EWJ", "EEM", "GLD"} | bond_etfs
     assert set(universe.index[universe["is_EM"]]) == {"EEM", "PDD", "MELI"}
     assert set(universe.loc[universe["sector"] == "International"].index) == {"VGK", "EWJ", "EEM"}
     bonds = universe[universe["asset_class"] == "Bond"]
-    assert set(bonds["bond_type"]) == {"Short-term", "Treasury 7-10y", "Corporate IG", "High Yield", "TIPS"}
+    assert set(bonds.index) == bond_etfs
+    assert set(bonds["bond_type"]) == {"Treasury", "Corporate IG", "High Yield", "Municipal", "Mortgage-backed",
+                                       "EM USD", "International hedged", "TIPS", "Floating rate"}
     assert universe.loc["GLD", "asset_class"] == "Commodity"
     assert (universe.loc[universe["vehicle"] == "Stock", "asset_class"] == "Equity").all()
     assert len(universe[universe["vehicle"] == "Stock"]) == 150

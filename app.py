@@ -16,7 +16,8 @@ st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide
 
 NAVY, GREY, ACCENT = "#1f3b57", "#a3adb8", "#c0392b"
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
-BOND_TYPES = ["Short-term", "Treasury 7-10y", "Corporate IG", "High Yield", "TIPS"]
+BOND_TYPES = ["Treasury", "Corporate IG", "High Yield", "Municipal", "Mortgage-backed", "EM USD",
+              "International hedged", "TIPS", "Floating rate"]
 WINDOW = est.DEFAULT_WINDOW
 EXPECTED_ERRORS = (data.DataError, est.EstimationError, btm.BacktestError, ValueError)
 log = logging.getLogger("app")
@@ -324,8 +325,13 @@ with tabs[2], guarded("Portfolio"):
             table = pd.DataFrame({"Asset": [label(t) for t in w.index], "Class": uni["asset_class"].values,
                                   "Sector / type": np.where(is_bond, uni["bond_type"], uni["sector"]),
                                   "Weight": w.values, "Amount (USD)": w.values * wealth}, index=w.index)
-            st.dataframe(table[table["Weight"] > 1e-4].sort_values("Weight", ascending=False).style.format(
-                {"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x)}), hide_index=True, width="stretch")
+            shown = table[table["Weight"] > 1e-4].sort_values("Weight", ascending=False)
+            dust = table.loc[(table["Weight"] > 0) & (table["Weight"] <= 1e-4), ["Weight", "Amount (USD)"]].sum()
+            if dust["Weight"] > 0:  # solver residuals: listed as one line so the table sums to 100%
+                shown.loc["_other"] = {"Asset": "Other positions below 0.01%", "Class": "", "Sector / type": "",
+                                       "Weight": dust["Weight"], "Amount (USD)": dust["Amount (USD)"]}
+            st.dataframe(shown.style.format({"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x)}),
+                         hide_index=True, width="stretch")
         with st.expander("Binding constraints"):
             act = res.duals[res.duals["active"]]
             st.caption("Gain in expected return (bps p.a.) if the bound were relaxed by 1 percentage point.")

@@ -160,7 +160,7 @@ def test_exclude_all_stocks():
     uni = data.load_universe()
     at = run_app({("multiselect", "Balanced.excl.tickers"): list(uni.index[uni["vehicle"] == "Stock"])})
     clean_or_clear(at)
-    assert set(holdings(at).index) <= set(uni.index[uni["vehicle"] != "Stock"])
+    assert set(holdings(at).index) - {"_other"} <= set(uni.index[uni["vehicle"] != "Stock"])
 
 
 def test_holdings_consistent_with_wealth():
