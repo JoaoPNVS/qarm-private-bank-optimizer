@@ -17,9 +17,11 @@ Risk budget: each profile has a maximum expected volatility; the optimiser maxim
 return under that cap (src/optimizer.py), and a benchmark mixing SPY and US aggregate bonds
 (src/benchmarks.py). Each profile also sets a floor on bond funds (cash does not count) equal
 to its benchmark's bond share (70 / 40 / 20 / 0%), active by default. The other default
-constraints are the same for every profile: at most 10% cash, 8% per stock, 20% per ETF, 40% per
-equity sector (international ETFs as one group), emerging markets at most 1/3 of equities, no
-exclusions.
+constraints are the same for every profile: at most 10% cash, 8% per stock, 15% per bond ETF,
+20% per other ETF, 40% per equity sector (international ETFs as one group), emerging markets at most 1/3 of equities, no
+exclusions. The bond sleeve also has profile limits: average duration at most 5 / 6 / 7 / 8 years,
+investment grade at least 90 / 80 / 70 / 60% of the bonds, high yield (HYG, EMB) at most
+5 / 10 / 15 / 20% of the portfolio.
 """
 from __future__ import annotations
 
@@ -114,6 +116,9 @@ class ProfileSpec:
     description: str
     max_volatility: float      # risk budget (annualised, ex ante), calibrated on the benchmark
     benchmark_equity: float    # SPY share of the profile benchmark, the rest in AGG
+    max_bond_duration: float   # years, average of the bond sleeve (AGG is about 6)
+    min_investment_grade: float  # share of the bond sleeve
+    max_high_yield: float      # share of the whole portfolio (HYG + EMB)
 
     @property
     def min_bonds(self) -> float:
@@ -124,14 +129,18 @@ class ProfileSpec:
 # Volatility cap = historical volatility of the profile benchmark (2003-10 to 2026-09) rounded up
 # to the next percent: 5.91 / 9.28 / 11.85 / 14.52% -> 6 / 10 / 12 / 15%, see src/benchmarks.py.
 SPECS = {
-    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30),
-    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60),
-    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.12, 0.80),
-    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.15, 1.00),
+    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30,
+                                5.0, 0.90, 0.05),
+    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60, 6.0, 0.80, 0.10),
+    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.12, 0.80,
+                          7.0, 0.70, 0.15),
+    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.15, 1.00,
+                           8.0, 0.60, 0.20),
 }
 MAX_CASH = 0.10
 MAX_STOCK_WEIGHT = 0.08
-MAX_ETF_WEIGHT = 0.20
+MAX_ETF_WEIGHT = 0.20       # equity and gold funds
+MAX_BOND_ETF_WEIGHT = 0.15
 MAX_SECTOR_WEIGHT = 0.40
 EM_EQUITY_CAP = 1 / 3
 
@@ -140,6 +149,8 @@ def default_constraints(profile: str) -> list[opt.Constraint]:
     s = SPECS[profile]
     return [opt.max_volatility(s.max_volatility), opt.min_bonds(s.min_bonds), opt.max_cash(MAX_CASH),
             opt.max_stock_weight(MAX_STOCK_WEIGHT), opt.max_etf_weight(MAX_ETF_WEIGHT),
+            opt.max_bond_etf_weight(MAX_BOND_ETF_WEIGHT), opt.max_bond_duration(s.max_bond_duration),
+            opt.min_investment_grade(s.min_investment_grade), opt.max_high_yield(s.max_high_yield),
             opt.max_sector_weight(MAX_SECTOR_WEIGHT), opt.em_equity_cap(EM_EQUITY_CAP), opt.exclusions()]
 
 

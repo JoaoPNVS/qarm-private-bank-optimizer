@@ -240,7 +240,16 @@ with tabs[1], guarded("Constraints"):
     card("max_stock_weight", col_b, lambda off: {"limit": pct_slider(
         "Max weight per stock", prof.MAX_STOCK_WEIGHT, 1, 30, 1, k("stock"), off)})
     card("max_etf_weight", col_b, lambda off: {"limit": pct_slider(
-        "Max weight per ETF", prof.MAX_ETF_WEIGHT, 5, 100, 5, k("etf"), off)})
+        "Max weight per equity / gold ETF", prof.MAX_ETF_WEIGHT, 5, 100, 5, k("etf"), off)})
+    card("max_bond_etf_weight", col_a, lambda off: {"limit": pct_slider(
+        "Max weight per bond ETF", prof.MAX_BOND_ETF_WEIGHT, 5, 100, 5, k("bondetf"), off)})
+    card("max_bond_duration", col_a, lambda off: {"limit": st.slider(
+        "Max average duration of the bonds (years)", 0.5, 15.0, float(spec_p.max_bond_duration), 0.5,
+        key=k("duration"), disabled=off)})
+    card("min_investment_grade", col_a, lambda off: {"min_share": pct_slider(
+        "Min investment grade (share of bonds)", spec_p.min_investment_grade, 0, 100, 5, k("ig"), off)})
+    card("max_high_yield", col_a, lambda off: {"limit": pct_slider(
+        "Max high yield incl. EM bonds (share of portfolio)", spec_p.max_high_yield, 0, 100, 1, k("hy"), off)})
     card("max_sector_weight", col_b, lambda off: {"limit": pct_slider(
         "Max weight per equity sector", prof.MAX_SECTOR_WEIGHT, 5, 100, 5, k("sector"), off)})
     card("exclusions", col_b, lambda off: {
@@ -249,7 +258,8 @@ with tabs[1], guarded("Constraints"):
                                   key=k("excl.tickers"), disabled=off)})
     st.caption("Emerging markets = the EEM fund plus PDD (China) and MELI (Latin America). International "
                "equity funds (VGK, EWJ, EEM) count as one sector. Bond funds and gold are not subject to "
-               "the sector limit.")
+               "the sector limit. Bond durations and ratings are the funds' current fact-sheet values. "
+               "High yield = HYG and the emerging-market bond fund EMB.")
 
 # --- optimisation ----------------------------------------------------------------------------
 

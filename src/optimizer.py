@@ -109,12 +109,66 @@ def max_stock_weight(limit: float = 0.08) -> Constraint:
         lambda p: f"No single company above {p['limit']:.0%} of the portfolio.")
 
 
+def _cap_per_fund(bonds: bool, label: str):
+    def build(w, d, p):
+        idx = [i for i, t in enumerate(d.tickers)
+               if d.universe.at[t, "vehicle"] == "ETF" and (d.universe.at[t, "asset_class"] == "Bond") == bonds]
+        return [Part(label, w[idx] <= p["limit"], [d.tickers[i] for i in idx])] if idx else []
+    return build
+
+
 def max_etf_weight(limit: float = 0.20) -> Constraint:
-    """Cap on each ETF (cash is not capped)."""
+    """Cap on each non-bond ETF (international equity funds, gold)."""
     return Constraint(
-        "max_etf_weight", "Maximum weight per ETF", {"limit": limit},
-        _cap_per_vehicle("ETF", "Max ETF weight"),
-        lambda p: f"No single fund above {p['limit']:.0%} of the portfolio.")
+        "max_etf_weight", "Maximum weight per equity / gold ETF", {"limit": limit},
+        _cap_per_fund(False, "Max ETF weight"),
+        lambda p: f"No single equity or gold fund above {p['limit']:.0%} of the portfolio.")
+
+
+def max_bond_etf_weight(limit: float = 0.15) -> Constraint:
+    """Cap on each bond ETF, so the bond sleeve is spread over several segments."""
+    return Constraint(
+        "max_bond_etf_weight", "Maximum weight per bond ETF", {"limit": limit},
+        _cap_per_fund(True, "Max bond ETF weight"),
+        lambda p: f"No single bond fund above {p['limit']:.0%} of the portfolio.")
+
+
+def _bond_mask(d, condition=None):
+    bond = d.universe["asset_class"] == "Bond"
+    return d.mask(bond if condition is None else bond & condition)
+
+
+def max_bond_duration(limit: float = 6.0) -> Constraint:
+    """Weighted average effective duration of the bond sleeve, linear form
+    sum(w_b * D_b) <= limit * sum(w_b) (holds trivially without bonds)."""
+    def build(w, d, p):
+        dur = d.universe["duration"].fillna(0.0).loc[d.tickers].values
+        return [Part(f"Bond duration <= {p['limit']:.1f}y", (_bond_mask(d) * dur) @ w <= p["limit"] * (_bond_mask(d) @ w))]
+
+    return Constraint(
+        "max_bond_duration", "Maximum bond duration", {"limit": limit}, build,
+        lambda p: f"Average duration of the bond portfolio at most {p['limit']:.1f} years.")
+
+
+def min_investment_grade(min_share: float = 0.80) -> Constraint:
+    """Investment-grade funds at least `min_share` of the bond sleeve (linear form)."""
+    def build(w, d, p):
+        ig = _bond_mask(d, d.universe["credit_quality"] == "IG")
+        return [Part(f"IG >= {p['min_share']:.0%} of bonds", ig @ w >= p["min_share"] * (_bond_mask(d) @ w))]
+
+    return Constraint(
+        "min_investment_grade", "Minimum investment grade", {"min_share": min_share}, build,
+        lambda p: f"At least {p['min_share']:.0%} of the bond portfolio rated investment grade.")
+
+
+def max_high_yield(limit: float = 0.10) -> Constraint:
+    """High-yield funds (HYG, and EMB counted as high yield) at most `limit` of the whole portfolio."""
+    def build(w, d, p):
+        return [Part(f"High yield <= {p['limit']:.0%}", _bond_mask(d, d.universe["credit_quality"] == "HY") @ w <= p["limit"])]
+
+    return Constraint(
+        "max_high_yield", "Maximum high yield", {"limit": limit}, build,
+        lambda p: f"High-yield and emerging-market bonds at most {p['limit']:.0%} of the portfolio.")
 
 
 def max_sector_weight(limit: float = 0.40) -> Constraint:

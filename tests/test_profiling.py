@@ -59,6 +59,11 @@ def test_bond_floors_and_default_caps():
     assert floors == {"Conservative": 0.70, "Balanced": 0.40, "Growth": 0.20, "Dynamic": 0.0}
     params = {c.key: c.params for c in prof.default_constraints("Balanced")}
     assert params["max_cash"]["limit"] == 0.10 and params["max_stock_weight"]["limit"] == 0.08 and params["max_etf_weight"]["limit"] == 0.20
+    assert params["max_bond_etf_weight"]["limit"] == 0.15 and params["max_bond_duration"]["limit"] == 6.0
+    assert params["min_investment_grade"]["min_share"] == 0.80 and params["max_high_yield"]["limit"] == 0.10
+    durations = [next(c for c in prof.default_constraints(p) if c.key == "max_bond_duration").params["limit"]
+                 for p in prof.PROFILES]
+    assert durations == sorted(durations)
     assert params["max_sector_weight"]["limit"] == 0.40 and abs(params["em_equity_cap"]["ratio"] - 1 / 3) < 1e-12
 
 

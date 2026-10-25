@@ -11,9 +11,11 @@ rebalancing pays the cost of building the portfolio from cash. The optimiser als
 If a rebalancing is infeasible (e.g. after the client tightened a constraint), the portfolio
 keeps its drifted weights and the event is recorded; an infeasible FIRST rebalancing is an error.
 
-Start: the default constraints need four eligible bond funds (70% bonds at most 20% per fund for
-the Conservative profile); TIP reaches 60 months in 2008-12, so every profile starts at the
-2008-12-31 rebalancing, with returns from 2009-01.
+Start: the default constraints need five eligible bond funds (70% bonds at most 15% per fund for
+the Conservative profile, with a short enough average duration); IEI, IGSB and IGIB reach 60
+months in 2012-01, so every profile starts at the 2012-01-31 rebalancing, with returns from
+2012-02. Rebalancing dates are every 3, 6 or 12 months from the start (semi-annual and annual
+dates are subsets of the quarterly ones).
 
 Ex-ante versus realised risk: each rebalancing records the volatility promised by the
 optimiser; the realised volatility is the annualised volatility of the strategy over the next 12
@@ -29,7 +31,7 @@ import pandas as pd
 from src import estimators as est, optimizer as opt
 
 FREQ_MONTHS = {"Quarterly": 3, "Semi-annual": 6, "Annual": 12}
-DEFAULT_START = pd.Timestamp("2008-12-31")
+DEFAULT_START = pd.Timestamp("2012-01-31")
 DEFAULT_TC = 0.001
 REALISED_HORIZON = 12
 
@@ -50,7 +52,7 @@ def rebalance_dates(index: pd.DatetimeIndex, start: pd.Timestamp, freq: str) -> 
     if freq not in FREQ_MONTHS:
         raise BacktestError(f"Unknown rebalancing frequency '{freq}'.")
     step = FREQ_MONTHS[freq]
-    dates = [d for d in index[index >= start] if d.month % step == 0]
+    dates = list(index[index >= start][::step])
     if len(dates) < 2:
         raise BacktestError("Not enough history after the start date for a backtest.")
     return dates

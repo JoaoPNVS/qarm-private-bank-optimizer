@@ -36,8 +36,9 @@ def test_every_profile_runs(profile):
 
 
 def test_incompatible_constraints_show_message():
-    # 70% in bonds needs at least four bond funds at 20%; at 10% per fund the five funds give 50%
-    at = run_app({("selectbox", "profile"): "Conservative", ("slider", "Conservative.etf"): 10})
+    # 70% in bonds at most 5% per bond fund: the 15 bond funds give 75% at best, and the duration
+    # and quality limits leave far fewer of them usable
+    at = run_app({("selectbox", "profile"): "Conservative", ("slider", "Conservative.bondetf"): 5})
     assert not at.exception
     assert any("cannot all be satisfied" in e.value for e in at.error)
 
@@ -107,6 +108,7 @@ def test_unexpected_error_in_the_optimisation(monkeypatch):
 # --- QA regression suite: edge cases, no stale values, cross-tab consistency -------------------
 
 OPTIONAL = ["min_bonds", "max_cash", "em_equity_cap", "max_stock_weight", "max_etf_weight",
+            "max_bond_etf_weight", "max_bond_duration", "min_investment_grade", "max_high_yield",
             "max_sector_weight", "exclusions"]
 
 
@@ -137,7 +139,11 @@ def test_all_optional_constraints_off(profile):
 @pytest.mark.parametrize("widgets", [
     {("slider", "Balanced.stock"): 1},
     {("slider", "Balanced.sector"): 5},
-    {("slider", "Balanced.etf"): 5},           # 40% bonds impossible at 5% per fund
+    {("slider", "Balanced.etf"): 5},
+    {("slider", "Balanced.bondetf"): 5},       # 40% bonds over fewer eligible funds in 2012
+    {("slider", "Balanced.duration"): 0.5},
+    {("slider", "Balanced.ig"): 100},
+    {("slider", "Balanced.hy"): 0},
     {("slider", "Balanced.vol"): 2.0},
     {("slider", "Balanced.vol"): 25.0},
     {("slider", "Balanced.bonds"): 100},       # feasible today, not in 2008 (four bond funds)

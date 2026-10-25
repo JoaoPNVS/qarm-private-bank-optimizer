@@ -53,7 +53,8 @@ def binding_cases(pdata):
     w = free_solution(pdata)
     uni = pdata.universe
     eq = uni["asset_class"] == "Equity"
-    stocks, etfs = uni["vehicle"] == "Stock", uni["vehicle"] == "ETF"
+    stocks = uni["vehicle"] == "Stock"
+    etfs = (uni["vehicle"] == "ETF") & (uni["asset_class"] != "Bond")
     top_stock = w[stocks].idxmax()
     top_sector = w[eq].groupby(uni.loc[eq, "sector"]).sum()
     em_share = w[eq & uni["is_EM"]].sum() / w[eq].sum()
@@ -86,6 +87,34 @@ def test_max_cash(pdata, universe):
     c = opt.max_cash(0.10)
     res = opt.solve(pdata, [vol_cap(0.02), c])
     assert res.ok and satisfied(c, res.weights, pdata) and satisfied(vol_cap(0.02), res.weights, pdata)
+
+
+def test_bond_constraints_respected_and_binding(estimates, universe):
+    # Test expected returns that reward duration and credit risk, so the free bond sleeve is long
+    # and holds high yield; 50% bonds at most 15% per fund spreads it over several segments.
+    bond = universe["asset_class"] == "Bond"
+    mu = estimates.mu.copy()
+    b = mu.index[bond.reindex(mu.index)]
+    mu[b] = 0.004 * universe.loc[b, "duration"] + 0.03 * (universe.loc[b, "credit_quality"] == "HY")
+    d = opt.ProblemData(mu, estimates.cov, universe)
+    base = [vol_cap(), opt.min_bonds(0.5), opt.max_bond_etf_weight(0.15)]
+    free = opt.solve(d, base).weights.reindex(universe.index).fillna(0)
+    assert (free[bond] > 0.01).sum() >= 4
+    dur = (free[bond] * universe.loc[bond, "duration"]).sum() / free[bond].sum()
+    hy = free[bond & (universe["credit_quality"] == "HY")].sum()
+    assert dur > 6 and hy > 0.05  # long sleeve with high yield: the three cases below really bind
+    ig_share = 1 - hy / free[bond].sum()
+    for c in [opt.max_bond_duration(dur / 2), opt.max_high_yield(hy / 2), opt.min_investment_grade((1 + ig_share) / 2)]:
+        assert not satisfied(c, free, d), c.key
+        res = opt.solve(d, base + [c])
+        assert res.ok and satisfied(c, res.weights, d) and all(satisfied(x, res.weights, d) for x in base), c.key
+
+
+def test_bond_and_other_etf_caps_are_separate(pdata, universe):
+    res = opt.solve(pdata, [vol_cap(), opt.min_bonds(0.5), opt.max_bond_etf_weight(0.15), opt.max_etf_weight(0.20)])
+    w = res.weights.reindex(universe.index).fillna(0)
+    bond_etf = (universe["vehicle"] == "ETF") & (universe["asset_class"] == "Bond")
+    assert w[bond_etf].max() <= 0.15 + 1e-6 and w[(universe["vehicle"] == "ETF") & ~bond_etf].max() <= 0.20 + 1e-6
 
 
 def test_exclusions_by_sector_and_ticker(pdata, universe):

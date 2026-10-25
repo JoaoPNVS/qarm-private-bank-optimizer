@@ -12,8 +12,17 @@ def satisfied(c, w, d):
         return np.sqrt(w @ d.cov @ w) <= p["limit"] + TOL
     if c.key == "max_stock_weight":
         return w[uni["vehicle"] == "Stock"].max() <= p["limit"] + TOL
+    bond = uni["asset_class"] == "Bond"
     if c.key == "max_etf_weight":
-        return w[uni["vehicle"] == "ETF"].max() <= p["limit"] + TOL
+        return w[(uni["vehicle"] == "ETF") & ~bond].max() <= p["limit"] + TOL
+    if c.key == "max_bond_etf_weight":
+        return w[(uni["vehicle"] == "ETF") & bond].max() <= p["limit"] + TOL
+    if c.key == "max_bond_duration":
+        return (w[bond] * uni.loc[bond, "duration"]).sum() <= p["limit"] * w[bond].sum() + TOL
+    if c.key == "min_investment_grade":
+        return w[bond & (uni["credit_quality"] == "IG")].sum() >= p["min_share"] * w[bond].sum() - TOL
+    if c.key == "max_high_yield":
+        return w[bond & (uni["credit_quality"] == "HY")].sum() <= p["limit"] + TOL
     if c.key == "em_equity_cap":
         return w[eq & uni["is_EM"]].sum() <= p["ratio"] * w[eq].sum() + TOL
     if c.key == "max_sector_weight":

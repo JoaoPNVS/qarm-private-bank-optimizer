@@ -29,8 +29,9 @@ def test_rebalance_dates(inputs):
     q = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly")
     s = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Semi-annual")
     a = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Annual")
-    assert q[0] == pd.Timestamp("2008-12-31") and {d.month for d in q} == {3, 6, 9, 12}
-    assert set(a) <= set(s) <= set(q) and {d.month for d in a} == {12}
+    assert q[0] == s[0] == a[0] == pd.Timestamp("2012-01-31")
+    assert {d.month for d in q} == {1, 4, 7, 10} and {d.month for d in a} == {1}
+    assert set(a) <= set(s) <= set(q)
     with pytest.raises(btm.BacktestError):
         btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Weekly")
 
@@ -38,7 +39,7 @@ def test_rebalance_dates(inputs):
 def test_weights_valid_every_month(balanced):
     w = balanced.weights
     assert np.allclose(w.sum(axis=1), 1) and (w >= -1e-9).all().all()
-    assert balanced.returns.index[0] == pd.Timestamp("2009-01-31")
+    assert balanced.returns.index[0] == pd.Timestamp("2012-02-29")
     assert len(balanced.returns) == len(w) - 1
 
 
@@ -93,11 +94,11 @@ def test_infeasible_rebalancing_keeps_weights(inputs, estimates):
 
 def test_infeasible_start_is_a_clear_error(inputs, estimates):
     uni, ret, rf = inputs
-    # 95% in bonds at most 20% per fund needs five bond funds; only four existed in 2008-12
+    # 95% in bonds at most 10% per fund needs ten bond funds; only seven existed in 2012-01
     with pytest.raises(btm.BacktestError, match="first rebalancing") as err:
-        btm.run_backtest(ret, rf, uni, [opt.max_volatility(0.10), opt.min_bonds(0.95), opt.max_etf_weight(0.2)],
+        btm.run_backtest(ret, rf, uni, [opt.max_volatility(0.10), opt.min_bonds(0.95), opt.max_bond_etf_weight(0.10)],
                          estimates=estimates)
-    assert "including 4 bond funds" in str(err.value) and "Minimum bonds" in str(err.value)
+    assert "including 7 bond funds" in str(err.value) and "Minimum bonds" in str(err.value)
 
 
 def test_performance_metrics():

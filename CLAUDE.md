@@ -48,7 +48,11 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - Maximum volatility = the profile's risk budget (mandatory).
 - Minimum share in bond funds = the profile's floor (active by default, can be changed).
 - Maximum cash: 10% (active by default, can be changed).
-- Max weight per single stock: 8%; max weight per ETF: 20%.
+- Max weight per single stock: 8%; per bond ETF: 15%; per other ETF (equity funds, gold): 20%.
+- Bond sleeve limits (defaults by profile Conservative / Balanced / Growth / Dynamic):
+  average effective duration of the bonds at most 5 / 6 / 7 / 8 years (linear form
+  sum(w_b D_b) <= D sum(w_b)); investment grade at least 90 / 80 / 70 / 60% of the bonds;
+  high yield (HYG + EMB) at most 5 / 10 / 15 / 20% of the portfolio.
 - Max weight per equity sector: 40%.
 - Emerging markets ≤ 1/3 of the equity allocation (linear form: EM ≤ (1/3)·equities).
 - Exclusions of sectors or individual companies.
@@ -115,7 +119,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
   correlations toward zero and keeps each asset's sample volatility exactly; the identity
   target on raw returns would inflate low-risk bond volatilities).
 - Solver: cvxpy with CLARABEL, fallback SCS.
-- **Backtest** (`src/backtest.py`): rolling 60-month window, rebalancing quarterly (or
+- **Backtest** (`src/backtest.py`): common start at the 2012-01-31 rebalancing (first date with
+  five eligible bond funds: 70% bonds at 15% per fund), rolling 60-month window, rebalancing
+  every 3 months from the start (or
   semi-annual / annual), transaction costs 10 bps per unit traded. Compared with SPY and the
   profile benchmark: annualised return, volatility, Sharpe, max drawdown. It must compare the
   **ex-ante volatility promised** at each rebalancing with the **realised volatility**.
