@@ -1,6 +1,7 @@
 ﻿import importlib
 from pathlib import Path
 
+import numpy as np
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -49,3 +50,24 @@ def test_backtest_tab_annual_rebalancing():
     at = run_app({("selectbox", "bt.freq"): "Annual"})
     assert not at.exception and not at.error and not at.warning
     assert any("Average ex-ante volatility" in c.value for c in at.caption)
+
+
+def backtest_metrics(at):
+    return next(df.value for df in at.dataframe if "Final wealth (USD)" in df.value.columns)
+
+
+def test_backtest_benchmark_follows_the_profile():
+    at = run_app()
+    rows = {}
+    for p in ["Conservative", "Balanced", "Growth", "Dynamic"]:
+        at.selectbox(key="profile").set_value(p)
+        at.run(timeout=TIMEOUT)
+        m = backtest_metrics(at)
+        assert list(m.index)[0] == "Strategy" and list(m.index)[-1] == "SPY"
+        rows[p] = m.iloc[1]
+        spy = m.loc["SPY"]
+    vols = [rows[p]["Volatility"] for p in rows]
+    rets = [rows[p]["Annual return"] for p in rows]
+    assert vols == sorted(vols) and len(set(vols)) == 4 and len(set(rets)) == 4
+    assert np.isclose(rows["Dynamic"]["Volatility"], spy["Volatility"])   # 100% SPY by definition
+    assert rows["Balanced"]["Annual return"] < spy["Annual return"]

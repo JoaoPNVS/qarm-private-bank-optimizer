@@ -63,3 +63,14 @@ def test_benchmarks_do_not_change_investable_estimates(series, estimates):
     plain = est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(),
                          data.load_universe()["asset_class"])
     assert plain.mu.equals(estimates.mu) and plain.cov.equals(estimates.cov)
+
+
+def test_profile_benchmarks_distinct_and_ordered(series):
+    _, bench = series
+    start = "2003-10-31"
+    rets = {p: bm.profile_benchmark_returns(prof.SPECS[p].benchmark_equity, bench).loc[start:] for p in prof.PROFILES}
+    vols = [rets[p].std() for p in prof.PROFILES]
+    assert vols == sorted(vols) and len(set(np.round(vols, 10))) == 4      # Conservative < Balanced < Growth < Dynamic
+    assert np.allclose(rets["Dynamic"], bench["SPY"].loc[start:])           # Dynamic benchmark = SPY
+    for a, b in zip(prof.PROFILES, prof.PROFILES[1:]):
+        assert not np.allclose(rets[a], rets[b])

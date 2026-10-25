@@ -29,6 +29,11 @@ def pct(x: float, digits: int = 1) -> str:
     return f"{x:.{digits}%}"
 
 
+def bench_label(profile: str) -> str:
+    e = prof.SPECS[profile].benchmark_equity
+    return "Benchmark (100% SPY)" if e >= 1 else f"Benchmark ({e:.0%} SPY / {1 - e:.0%} AGG)"
+
+
 def fig_layout(fig, height=380):
     fig.update_layout(template="plotly_white", height=height, margin=dict(l=10, r=10, t=40, b=10),
                       legend=dict(orientation="h", y=1.08, x=0), font=dict(size=13))
@@ -79,7 +84,7 @@ def run_backtest(profile: str, cons_json: str, freq: str, tc: float):
                            freq=freq, tc=tc, estimates=backtest_estimates())
     idx = res.returns.index
     series = pd.DataFrame({"Strategy": res.returns,
-                           "Profile benchmark": bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity,
+                           bench_label(profile): bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity,
                                                                              bench).reindex(idx),
                            "SPY": bench["SPY"].reindex(idx)})
     return res, series
@@ -257,7 +262,7 @@ with tabs[2]:
         c[2].metric("Sharpe ratio", f"{res.sharpe:.2f}", f"{res.sharpe - bench_stats['sharpe']:+.2f} vs benchmark")
         c[3].metric("Tracking error vs benchmark", pct(te, 2))
         comp = pd.DataFrame({"Portfolio": [res.expected_return, res.volatility, res.sharpe],
-                             "Profile benchmark": [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
+                             bench_label(profile): [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
                              "SPY": [spy_stats["expected_return"], spy_stats["volatility"], spy_stats["sharpe"]]},
                             index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
         st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
@@ -330,10 +335,12 @@ with tabs[3]:
             {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
              "Final wealth (USD)": lambda x: usd(x), "Turnover p.a.": lambda x: "" if pd.isna(x) else f"{x:.0%}"}),
             width="stretch")
+        if spec_p.benchmark_equity >= 1:
+            st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")
 
         growth = wealth * (1 + series).cumprod()
         f = go.Figure([go.Scatter(x=growth.index, y=growth[k], name=k, line=dict(color=clr, width=w_, dash=dash))
-                       for k, clr, w_, dash in (("Strategy", NAVY, 3, "solid"), ("Profile benchmark", GREY, 2, "solid"),
+                       for k, clr, w_, dash in (("Strategy", NAVY, 3, "solid"), (bench_label(profile), GREY, 2, "solid"),
                                                 ("SPY", ACCENT, 2, "dot"))])
         f.update_layout(title=f"Growth of {usd(wealth)}", yaxis_title="USD", yaxis_type="log")
         st.plotly_chart(fig_layout(f, 430), width="stretch")
@@ -351,7 +358,7 @@ with tabs[3]:
                      f"{metrics.loc['Strategy', 'volatility']:.1%}.")
         dd = pd.DataFrame({k: risk.drawdowns(series[k]) for k in series}) * 100
         f = go.Figure([go.Scatter(x=dd.index, y=dd[k], name=k, line=dict(color=clr))
-                       for k, clr in (("Strategy", NAVY), ("Profile benchmark", GREY), ("SPY", ACCENT))])
+                       for k, clr in (("Strategy", NAVY), (bench_label(profile), GREY), ("SPY", ACCENT))])
         f.update_layout(title="Drawdowns", yaxis_title="%")
         right.plotly_chart(fig_layout(f, 380), width="stretch")
 
