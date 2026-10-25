@@ -37,9 +37,11 @@ Grading criteria (from the professor) — every feature should serve one of thes
   | Dynamic      |     16% |                 0% | 100 / 0                     |
 
   Calibration rule for the vol caps: historical volatility of the profile benchmark rounded UP
-  to the next percent, so the optimised portfolio takes the same risk as its benchmark. The
-  values above were validated on the previous data; **re-check them with the USD benchmarks**
-  (tested in `tests/test_benchmarks.py`) and report any difference to the team before changing.
+  to the next percent, so the optimised portfolio takes the same risk as its benchmark.
+  Re-checked on the USD benchmarks (2003-10 to 2026-09): vols 5.91 / 9.28 / 11.85 / 14.52%,
+  i.e. the rule gives 6 / 10 / **12 / 15%**. The caps above (validated on the earlier CHF data)
+  are kept until the team decides on Growth and Dynamic. Invariant tested in
+  `tests/test_benchmarks.py`: no cap is below its benchmark's historical volatility.
   The bonds + cash floor equals the benchmark's bond share.
 
 ## Client constraints (`src/optimizer.py`; simple, explainable, all editable in the app)

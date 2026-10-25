@@ -25,6 +25,14 @@ def test_profile_benchmark_is_the_stated_mix(series):
     assert bm.profile_benchmark_returns(1.0, bench).equals(bench["SPY"].dropna().rename("Benchmark"))
 
 
+@pytest.mark.parametrize("profile", prof.PROFILES)
+def test_volatility_cap_not_below_benchmark_risk(series, profile):
+    _, bench = series
+    s = prof.SPECS[profile]
+    vol = bm.profile_benchmark_returns(s.benchmark_equity, bench).loc["2003-10-31":].std() * np.sqrt(12)
+    assert vol <= s.max_volatility < vol + 0.02
+
+
 def test_benchmark_equity_increases_with_profile():
     shares = [prof.SPECS[p].benchmark_equity for p in prof.PROFILES]
     assert shares == sorted(shares) and shares[-1] == 1.0

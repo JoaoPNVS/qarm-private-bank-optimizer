@@ -5,9 +5,11 @@ rebalanced monthly. Equity shares: Conservative 30%, Balanced 60%, Growth 80%, D
 (see profiling.SPECS). AGG has returns from 2003-10, so mixed benchmarks start there; SPY
 starts in 1998-02.
 
-Each profile's volatility cap is calibrated on its benchmark: the benchmark's historical
-volatility rounded UP to the next full percent, so the optimised portfolio takes the same risk
-as the benchmark it is compared with (tested in tests/test_benchmarks.py).
+Volatility caps are calibrated on these benchmarks: historical benchmark volatility rounded UP
+to the next full percent, so the optimised portfolio takes the same risk as its benchmark.
+Measured on USD data 2003-10 to 2026-09: 5.91% / 9.28% / 11.85% / 14.52%, i.e. caps
+6 / 10 / 12 / 15%. The caps in use (6 / 10 / 13 / 16%) were validated on the earlier CHF data;
+the difference for Growth and Dynamic is pending a team decision (see CLAUDE.md).
 """
 from __future__ import annotations
 

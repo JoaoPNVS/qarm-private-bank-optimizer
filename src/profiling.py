@@ -120,8 +120,8 @@ class ProfileSpec:
         return round(1 - self.benchmark_equity, 2)
 
 
-# Volatility cap = historical volatility of the profile benchmark rounded up to the next
-# percent, see src/benchmarks.py.
+# Volatility caps validated by the team; calibration on the USD benchmarks gives 6/10/12/15%
+# (pending decision for Growth and Dynamic), see src/benchmarks.py.
 SPECS = {
     "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30),
     "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60),
