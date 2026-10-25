@@ -14,7 +14,7 @@ def series():
 def estimates(series):
     ret, bench = series
     return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(),
-                        data.load_universe()["asset_class"], benchmarks=bench, benchmark_class=bm.BENCHMARK_CLASS)
+                        est.shrinkage_groups(data.load_universe()), benchmarks=bench, benchmark_class=bm.BENCHMARK_CLASS)
 
 
 def test_profile_benchmark_is_the_stated_mix(series):
@@ -61,7 +61,7 @@ def test_tracking_error(estimates):
 def test_benchmarks_do_not_change_investable_estimates(series, estimates):
     ret, _ = series
     plain = est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(),
-                         data.load_universe()["asset_class"])
+                         est.shrinkage_groups(data.load_universe()))
     assert plain.mu.equals(estimates.mu) and plain.cov.equals(estimates.cov)
 
 

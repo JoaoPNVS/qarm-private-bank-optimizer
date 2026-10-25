@@ -14,7 +14,7 @@ def universe():
 @pytest.fixture(scope="module")
 def estimates(universe):
     ret = data.load_returns()
-    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), universe["asset_class"])
+    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), est.shrinkage_groups(universe))
 
 
 @pytest.fixture(scope="module")
@@ -52,9 +52,9 @@ def binding_cases(pdata):
     """Each constraint at a level that the unconstrained solution violates."""
     w = free_solution(pdata)
     uni = pdata.universe
-    eq = uni["asset_class"] == "Equity"
+    eq = est.shrinkage_groups(uni) == "Equity"
     stocks = uni["vehicle"] == "Stock"
-    etfs = (uni["vehicle"] == "ETF") & (uni["asset_class"] != "Bond")
+    etfs = (uni["vehicle"] == "ETF") & (est.shrinkage_groups(uni) != "Bond")
     top_stock = w[stocks].idxmax()
     top_sector = w[eq].groupby(uni.loc[eq, "sector"]).sum()
     em_share = w[eq & uni["is_EM"]].sum() / w[eq].sum()
@@ -66,7 +66,7 @@ def binding_cases(pdata):
         opt.max_sector_weight(top_sector.max() / 2),
         opt.exclusions(tickers=[top_stock]),
         opt.exclusions(sectors=[top_sector.idxmax()]),
-        opt.min_bonds(min(0.9, w[uni["asset_class"] == "Bond"].sum() + 0.3)),
+        opt.min_bonds(min(0.9, w[est.shrinkage_groups(uni) == "Bond"].sum() + 0.3)),
     ]
 
 
@@ -140,7 +140,7 @@ def test_inactive_constraint_is_ignored(pdata):
 
 def test_infeasibility_is_diagnosed(pdata):
     # no bonds or cash allowed and a 2% volatility cap: impossible with equities and gold only
-    cons = [vol_cap(0.02), opt.exclusions(sectors=["Bonds", "Cash"])]
+    cons = [vol_cap(0.02), opt.exclusions(sectors=["Bonds", "Cash", "Cash equivalents"])]
     res = opt.solve(pdata, cons)
     assert not res.ok and res.weights is None
     assert set(res.diagnosis.conflicting) == {"exclusions", "max_volatility"}

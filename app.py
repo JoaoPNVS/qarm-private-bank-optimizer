@@ -16,6 +16,7 @@ st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide
 
 NAVY, GREY, ACCENT = "#1f3b57", "#a3adb8", "#c0392b"
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
+CLASS_LABELS = {"Equity": "Equities", "Bond": "Bonds", "Commodity": "Gold", "Cash": "Cash & equivalents"}
 WINDOW = est.DEFAULT_WINDOW
 EXPECTED_ERRORS = (data.DataError, est.EstimationError, btm.BacktestError, ValueError)
 log = logging.getLogger("app")
@@ -64,7 +65,8 @@ def load_data():
 def get_estimates() -> est.Estimates:
     universe, returns, rf, bench = load_data()
     window = est.estimation_window(returns, returns.index[-1], WINDOW)
-    return est.estimate(window, rf, universe["asset_class"], benchmarks=bench, benchmark_class=bm.BENCHMARK_CLASS)
+    return est.estimate(window, rf, est.shrinkage_groups(universe), benchmarks=bench,
+                        benchmark_class=bm.BENCHMARK_CLASS)
 
 
 def build_constraints(profile: str, spec: dict) -> list[opt.Constraint]:
@@ -89,7 +91,7 @@ def backtest_estimates() -> dict:
     """Estimates at every quarter-end of the backtest (semi-annual/annual dates are a subset)."""
     universe, returns, rf, _ = load_data()
     dates = btm.rebalance_dates(returns.index, btm.DEFAULT_START, "Quarterly")
-    return btm.estimates_by_date(returns, rf, universe["asset_class"], dates)
+    return btm.estimates_by_date(returns, rf, est.shrinkage_groups(universe), dates)
 
 
 @st.cache_data(show_spinner="Running the backtest (re-optimising at every rebalancing)...")
@@ -307,6 +309,7 @@ with tabs[2], guarded("Portfolio"):
         b_eq = spec_p.benchmark_equity
         by_class = pd.DataFrame({"Portfolio": w.groupby(uni["asset_class"]).sum(),
                                  "Benchmark": pd.Series({"Equity": b_eq, "Bond": 1 - b_eq})}).reindex(CLASS_ORDER).fillna(0)
+        by_class.index = by_class.index.map(CLASS_LABELS)
         is_bond = uni["asset_class"] == "Bond"
         is_eq = uni["asset_class"] == "Equity"
         by_sector = w[is_eq].groupby(uni.loc[is_eq, "sector"]).sum().sort_values(ascending=False)
@@ -421,8 +424,9 @@ with tabs[3], guarded("Backtest"):
         right.plotly_chart(fig_layout(f, 380), width="stretch")
 
         alloc = bt.weights.T.groupby(universe.loc[bt.weights.columns, "asset_class"]).sum().T.reindex(columns=CLASS_ORDER)
+        alloc.columns = alloc.columns.map(CLASS_LABELS)
         f = go.Figure([go.Scatter(x=alloc.index, y=alloc[c] * 100, name=c, stackgroup="one", mode="none",
-                                  fillcolor=clr) for c, clr in zip(CLASS_ORDER, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+                                  fillcolor=clr) for c, clr in zip(alloc.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
         f.update_layout(title="Allocation by asset class over time (month-end, after drift)", yaxis_title="%",
                         yaxis_range=[0, 100])
         st.plotly_chart(fig_layout(f, 360), width="stretch")

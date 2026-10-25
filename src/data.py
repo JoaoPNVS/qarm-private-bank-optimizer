@@ -54,7 +54,7 @@ def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
         raise DataError("Column 'is_EM' must contain only True/False.")
     if set(uni["vehicle"]) - VEHICLES:
         raise DataError(f"Unknown vehicles {sorted(set(uni['vehicle']) - VEHICLES)}")
-    bonds = uni["asset_class"] == "Bond"
+    bonds = uni["bond_type"] != ""  # bond funds and cash-equivalent funds (BIL, FLOT) carry fund tags
     if uni.loc[bonds, NUMERIC_COLUMNS].isna().any().any() or not uni.loc[bonds, "credit_quality"].isin(["IG", "HY"]).all():
         raise DataError("Every bond fund needs duration, maturity, rating and IG/HY tags in universe.csv.")
     if (uni["listed_currency"] != "USD").any():

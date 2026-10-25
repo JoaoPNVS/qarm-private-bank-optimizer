@@ -47,7 +47,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
 ## Client constraints (`src/optimizer.py`; simple, explainable, all editable in the app)
 - Maximum volatility = the profile's risk budget (mandatory).
 - Minimum share in bond funds = the profile's floor (active by default, can be changed).
-- Maximum cash: 10% (active by default, can be changed).
+- Maximum cash & equivalents: 10% (CASH_USD + BIL + FLOT; active by default, can be changed).
 - Max weight per single stock: 8%; per bond ETF: 15%; per other ETF (equity funds, gold): 20%.
 - Bond sleeve limits (defaults by profile Conservative / Balanced / Growth / Dynamic):
   average effective duration of the bonds at most 5 / 6 / 7 / 8 years (linear form
@@ -66,14 +66,17 @@ Grading criteria (from the professor) — every feature should serve one of thes
     one share class per company, GICS sector), built once by `scripts/build_universe.py`
     (snapshot date in `data/universe_as_of.txt`);
   - international equity ETFs: Europe, Japan, emerging markets (proposed VGK, EWJ, EEM);
-  - a bond sleeve of 15 USD bond ETFs used as market segments (`bond_type`; individual bonds
-    have no free prices): Treasury by maturity BIL (1-3 months), SHY (1-3y), IEI (3-7y),
+  - 15 USD bond ETFs used as market segments (`bond_type`; individual bonds have no free
+    prices): Treasury by maturity BIL (1-3 months), SHY (1-3y), IEI (3-7y),
     IEF (7-10y), TLT (20y+); corporate investment grade by maturity IGSB (1-5y), IGIB (5-10y),
     VCLT (10y+); high yield HYG; municipal MUB; agency mortgage-backed MBB; emerging-market
     USD sovereigns EMB; international USD-hedged BNDX; TIPS (TIP); floating rate FLOT.
     IGSB/IGIB replace the requested VCSH/VCIT (same segments, history from 2007-02 instead of
     2009-12). VCLT, BNDX and FLOT have no older equivalent and become eligible only in 2014-11,
-    2018-06 and 2016-06;
+    2018-06 and 2016-06. **BIL and FLOT (duration ~0) are cash equivalents:** asset_class Cash,
+    sector "Cash equivalents"; they count in the 10% cash cap, not in the bond floor, and are
+    shown under "Cash & equivalents". The bond sleeve is the other 13 funds. The floor stays
+    feasible for every profile at every rebalancing from 2012 (tested);
   - bond tags (columns of universe.csv, from `BOND_CHARACTERISTICS` in `scripts/build_universe.py`):
     `issuer_type` (Treasury, Corporate, Municipal, Agency mortgage, EM sovereign, International),
     `maturity_bucket` from the weighted average maturity (<1y Ultra-short, 1-5y Short, 5-10y
@@ -112,9 +115,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
   invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
   (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
 - Expected returns: historical mean over the 60-month window, shrunk toward the grand mean of
-  the asset's own class: mu_i = (1 - a) m_i + a m_class, **a = 0.8**. Raw 5-year means are
-  mostly noise and a max-return optimiser piles into past winners; shrinking within each class
-  keeps bonds from inheriting equity returns. See `src/estimators.py`.
+  the asset's shrinkage group: mu_i = (1 - a) m_i + a m_group, **a = 0.8**. Groups = asset
+  classes, except **bonds, grouped by maturity bucket** (Short / Intermediate / Long): with 15
+  segments, the whole bond class mean (-3.3% on 2021-2026, driven by long bonds in 2022) pulled
+  BIL to -2.7% although its real excess return is ~0. Cash equivalents shrink toward the cash
+  group (CASH_USD, BIL, FLOT). Raw 5-year means are mostly noise and a max-return optimiser
+  piles into past winners; shrinking within groups keeps bonds from inheriting equity returns.
+  The AGG benchmark is shrunk toward "Bond Intermediate". See `src/estimators.py`.
 - Covariance: Ledoit-Wolf on standardised returns over the 60-month window (shrinks
   correlations toward zero and keeps each asset's sample volatility exactly; the identity
   target on raw returns would inflate low-risk bond volatilities).
@@ -168,7 +175,7 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
 - Cache expensive computations with `st.cache_data`.
 - Tests are split with the pytest marker `slow` (app scenarios with Streamlit AppTest, several
   minutes; the whole of `tests/test_smoke.py`). During development run only the fast tests:
-  `pytest -m "not slow"` (~20 s). Before the final commit of a step run the FULL suite: `pytest`
+  `pytest -m "not slow"` (~45 s). Before the final commit of a step run the FULL suite: `pytest`
   (fast + slow) and a `streamlit run app.py` headless smoke test, then say done.
 - New AppTest scenarios go in `tests/test_smoke.py` (marked slow); everything else stays fast.
 - One commit per finished and tested step, with a clear message.

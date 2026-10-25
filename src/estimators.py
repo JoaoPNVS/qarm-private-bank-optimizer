@@ -9,15 +9,20 @@ whole estimation window (default 60 months) ending at that date. Recent IPOs the
 the optimisation 60 months after their first monthly return.
 
 Expected returns: historical mean over the window, shrunk toward the grand mean of the asset's
-own class (equities toward the average equity, bonds toward the average bond):
-    mu_i = (1 - a) * m_i + a * m_class(i)
+shrinkage GROUP (`shrinkage_groups`):
+    mu_i = (1 - a) * m_i + a * m_group(i)
+Groups are the asset classes (equities toward the average equity, cash and cash equivalents
+toward the average of cash, BIL and FLOT), except bonds, which are grouped by MATURITY BUCKET
+(short, intermediate, long): with 15 bond segments the whole-class mean was driven by the losses
+of long bonds in 2022 and pulled every short fund far below its own (near-zero) excess return.
 Raw 60-month means are mostly noise (a 25%-volatility stock has a standard error of about 11%
 p.a. on a 5-year mean); a long-only optimiser would pile into the luckiest past winners.
 With a = 0.8 (default) each asset keeps 20% of its own past performance: the ranking is
 preserved but the dispersion is divided by five, which stops the optimiser from concentrating
 on a handful of past winners (with a = 0.5 a Balanced portfolio was 100% equities with an
-ex-ante Sharpe above 2). An asset alone in its class (gold) keeps its own mean. Shrinking within each class matters: toward the global mean, low-risk bonds would
-inherit equity-like returns and absorb the portfolio.
+ex-ante Sharpe above 2). An asset alone in its group (gold) keeps its own mean. Shrinking within
+groups matters: toward the global mean, low-risk bonds would inherit equity-like returns and
+absorb the portfolio.
 """
 from __future__ import annotations
 
@@ -104,24 +109,31 @@ def ledoit_wolf_cov(excess: pd.DataFrame) -> tuple[pd.DataFrame, float]:
     return cov, float(lw.shrinkage_)
 
 
-def shrunk_mean(excess: pd.DataFrame, asset_class: pd.Series,
-                shrinkage: float = DEFAULT_MEAN_SHRINKAGE) -> pd.Series:
-    """Annualised sample mean shrunk toward the grand mean of each asset class.
+def shrinkage_groups(universe: pd.DataFrame) -> pd.Series:
+    """Shrinkage group of each asset: its asset class, or "Bond <maturity bucket>" for bonds."""
+    groups = universe["asset_class"].copy()
+    bonds = universe["asset_class"] == "Bond"
+    groups[bonds] = "Bond " + universe.loc[bonds, "maturity_bucket"]
+    return groups.rename("group")
 
-    shrinkage = 0 gives raw historical means, 1 gives every asset its class average.
+
+def shrunk_mean(excess: pd.DataFrame, groups: pd.Series,
+                shrinkage: float = DEFAULT_MEAN_SHRINKAGE) -> pd.Series:
+    """Annualised sample mean shrunk toward the grand mean of each shrinkage group.
+
+    shrinkage = 0 gives raw historical means, 1 gives every asset its group average.
     """
     if not 0 <= shrinkage <= 1:
         raise EstimationError("Shrinkage must be between 0 and 1.")
     m = excess.mean() * MONTHS_PER_YEAR
-    cls = asset_class.reindex(m.index)
-    target = m.groupby(cls).transform("mean")
+    target = m.groupby(groups.reindex(m.index)).transform("mean")
     mu = (1 - shrinkage) * m + shrinkage * target
     if CASH_TICKER in mu:
         mu[CASH_TICKER] = 0.0
     return mu.rename("mu")
 
 
-def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
+def estimate(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
              mean_shrinkage: float = DEFAULT_MEAN_SHRINKAGE,
              benchmarks: pd.DataFrame | None = None,
              benchmark_class: dict[str, str] | None = None) -> Estimates:
@@ -129,15 +141,15 @@ def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
 
     `benchmarks` (e.g. SPY and AGG, not investable) are estimated jointly so the portfolio and
     its benchmark are compared with the same method: their covariances come from the same
-    Ledoit-Wolf fit and each mean is shrunk toward the grand mean of its class
-    (`benchmark_class`, e.g. {"SPY": "Equity", "AGG": "Bond"}) computed on investable assets
-    only; a benchmark whose class has no investable asset keeps its raw mean.
+    Ledoit-Wolf fit and each mean is shrunk toward the grand mean of its shrinkage group
+    (`benchmark_class`, e.g. {"SPY": "Equity", "AGG": "Bond Intermediate"}) computed on investable
+    assets only; a benchmark whose group has no investable asset keeps its raw mean.
     """
     if returns.isna().any().any():
         raise EstimationError("The estimation window contains missing returns.")
     ex = excess_returns(returns, rf)
     cov, lw_shrinkage = ledoit_wolf_cov(ex)
-    mu = shrunk_mean(ex, asset_class, mean_shrinkage)
+    mu = shrunk_mean(ex, groups, mean_shrinkage)
     out = Estimates(mu, cov, mean_shrinkage, lw_shrinkage, ex.index[0], ex.index[-1])
     if benchmarks is not None:
         b = benchmarks.reindex(ex.index)
@@ -145,7 +157,7 @@ def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
             raise EstimationError("Benchmark returns missing in the estimation window.")
         b_ex = b.sub(rf.reindex(ex.index), axis=0)
         out.joint_cov, _ = ledoit_wolf_cov(pd.concat([ex, b_ex], axis=1))
-        class_mean = (ex.mean() * MONTHS_PER_YEAR).groupby(asset_class.reindex(ex.columns)).mean()
+        class_mean = (ex.mean() * MONTHS_PER_YEAR).groupby(groups.reindex(ex.columns)).mean()
         raw = b_ex.mean() * MONTHS_PER_YEAR
         target = pd.Series({t: class_mean.get((benchmark_class or {}).get(t), raw[t]) for t in raw.index})
         out.benchmark_mu = ((1 - mean_shrinkage) * raw + mean_shrinkage * target).rename("mu")

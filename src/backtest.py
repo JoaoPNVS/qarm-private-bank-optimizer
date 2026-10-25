@@ -58,11 +58,11 @@ def rebalance_dates(index: pd.DatetimeIndex, start: pd.Timestamp, freq: str) -> 
     return dates
 
 
-def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
+def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
                       dates: list[pd.Timestamp], window: int = est.DEFAULT_WINDOW,
                       mean_shrinkage: float = est.DEFAULT_MEAN_SHRINKAGE) -> dict:
     """Estimates at each date (independent of the client, so they can be shared across profiles)."""
-    return {d: est.estimate(est.estimation_window(returns, d, window), rf, asset_class, mean_shrinkage)
+    return {d: est.estimate(est.estimation_window(returns, d, window), rf, groups, mean_shrinkage)
             for d in dates}
 
 
@@ -81,7 +81,7 @@ def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
     for i, t in enumerate(months):
         if t in rebals:
             e = estimates.get(t) or est.estimate(est.estimation_window(returns, t, window), rf,
-                                                 universe["asset_class"])
+                                                 est.shrinkage_groups(universe))
             d = opt.ProblemData(e.mu, e.cov, universe, w_prev=w if invested else None, tc=tc)
             res = opt.solve(d, constraints, diagnose=not invested)
             if res.ok:

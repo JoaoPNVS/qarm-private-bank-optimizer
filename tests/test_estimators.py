@@ -18,7 +18,7 @@ def window():
 
 @pytest.fixture(scope="module")
 def estimates(window, universe):
-    return est.estimate(*window, universe["asset_class"])
+    return est.estimate(*window, est.shrinkage_groups(universe))
 
 
 def test_cov_psd_and_preserves_volatility(window, estimates):
@@ -32,9 +32,15 @@ def test_cov_psd_and_preserves_volatility(window, estimates):
     assert 0 < estimates.cov_shrinkage < 1
 
 
-def test_shrinkage_toward_class_mean(window, universe):
+def test_shrinkage_groups(universe):
+    g = est.shrinkage_groups(universe)
+    assert g["AAPL"] == "Equity" and g["GLD"] == "Commodity" and g["BIL"] == "Cash" and g["FLOT"] == "Cash"
+    assert g["SHY"] == "Bond Short" and g["IEF"] == "Bond Intermediate" and g["TLT"] == "Bond Long"
+
+
+def test_shrinkage_toward_group_mean(window, universe):
     ex = est.excess_returns(*window)
-    cls = universe["asset_class"]
+    cls = est.shrinkage_groups(universe)
     raw = est.shrunk_mean(ex, cls, 0.0)
     assert np.allclose(raw.drop(data.CASH_TICKER), ex.drop(columns=data.CASH_TICKER).mean() * 12)
     full = est.shrunk_mean(ex, cls, 1.0)
@@ -44,6 +50,14 @@ def test_shrinkage_toward_class_mean(window, universe):
     half = est.shrunk_mean(ex, cls, 0.5)
     assert np.allclose(half, (raw + full) / 2)
     assert half[data.CASH_TICKER] == 0
+
+
+def test_short_bonds_not_dragged_by_long_bonds(window, universe):
+    # whole-class shrinkage pulled short funds toward the 2022 losses of long bonds
+    ex = est.excess_returns(*window)
+    by_bucket = est.shrunk_mean(ex, est.shrinkage_groups(universe))
+    whole_class = est.shrunk_mean(ex, universe["asset_class"])
+    assert by_bucket["SHY"] > whole_class["SHY"] and by_bucket["TLT"] < whole_class["TLT"]
 
 
 def test_shrinkage_keeps_bonds_below_equities(estimates, universe):
@@ -64,4 +78,4 @@ def test_window_errors():
     with pytest.raises(est.EstimationError, match="Only"):
         est.estimation_window(ret, pd.Timestamp("1996-06-30"), 60)
     with pytest.raises(est.EstimationError, match="Shrinkage"):
-        est.shrunk_mean(ret.iloc[-60:].fillna(0), data.load_universe()["asset_class"], 1.5)
+        est.shrunk_mean(ret.iloc[-60:].fillna(0), est.shrinkage_groups(data.load_universe()), 1.5)

@@ -19,7 +19,7 @@ def returns():
 
 def test_universe_composition(universe):
     counts = universe["asset_class"].value_counts()
-    assert counts["Equity"] == 153 and counts["Bond"] == 15 and counts["Cash"] == 1
+    assert counts["Equity"] == 153 and counts["Bond"] == 13 and counts["Cash"] == 3
     assert (universe["listed_currency"] == "USD").all()             # no currency conversion anywhere
     assert not {"GOOG", "FOX", "NWS"} & set(universe.index)        # one share class per company
     stocks = universe[universe["asset_class"] == "Equity"]
@@ -28,15 +28,16 @@ def test_universe_composition(universe):
 
 def test_fixed_assets_and_tags(universe):
     etfs = universe[universe["vehicle"] == "ETF"]
-    bond_etfs = {"BIL", "SHY", "IEI", "IEF", "TLT", "IGSB", "IGIB", "VCLT", "HYG", "MUB", "MBB", "EMB", "BNDX",
-                 "TIP", "FLOT"}
-    assert set(etfs.index) == {"VGK", "EWJ", "EEM", "GLD"} | bond_etfs
+    bond_etfs = {"SHY", "IEI", "IEF", "TLT", "IGSB", "IGIB", "VCLT", "HYG", "MUB", "MBB", "EMB", "BNDX", "TIP"}
+    cash_equivalents = {"BIL", "FLOT"}
+    assert set(etfs.index) == {"VGK", "EWJ", "EEM", "GLD"} | bond_etfs | cash_equivalents
+    assert set(universe.index[universe["asset_class"] == "Cash"]) == cash_equivalents | {"CASH_USD"}
     assert set(universe.index[universe["is_EM"]]) == {"EEM", "PDD", "MELI"}
     assert set(universe.loc[universe["sector"] == "International"].index) == {"VGK", "EWJ", "EEM"}
     bonds = universe[universe["asset_class"] == "Bond"]
     assert set(bonds.index) == bond_etfs
     assert set(bonds["bond_type"]) == {"Treasury", "Corporate IG", "High Yield", "Municipal", "Mortgage-backed",
-                                       "EM USD", "International hedged", "TIPS", "Floating rate"}
+                                       "EM USD", "International hedged", "TIPS"}
     assert universe.loc["GLD", "asset_class"] == "Commodity"
     assert (universe.loc[universe["vehicle"] == "Stock", "asset_class"] == "Equity").all()
     assert len(universe[universe["vehicle"] == "Stock"]) == 150
@@ -89,8 +90,9 @@ def test_bond_characteristics(universe):
     b = universe[universe["asset_class"] == "Bond"]
     assert b["duration"].between(0, 20).all() and (b["wam"] >= b["duration"] - 1e-9).all()
     assert set(b.index[b["credit_quality"] == "HY"]) == {"HYG", "EMB"}
-    assert set(b["maturity_bucket"]) == {"Ultra-short", "Short", "Intermediate", "Long"}
+    assert set(b["maturity_bucket"]) == {"Short", "Intermediate", "Long"}
+    assert universe.loc["BIL", "maturity_bucket"] == "Ultra-short"  # tags kept on cash equivalents
     assert b.loc["TLT", "duration"] > b.loc["IEF", "duration"] > b.loc["IEI", "duration"] > b.loc["SHY", "duration"]
     assert b.loc["HYG", "rating_score"] > b.loc["IGIB", "rating_score"] > b.loc["IEF", "rating_score"]  # worse = higher
     assert b["char_source"].str.startswith("https://").all() and (b["char_as_of"] >= "2026-09-30").all()
-    assert universe.loc[universe["asset_class"] != "Bond", "duration"].isna().all()
+    assert universe.loc[universe["bond_type"] == "", "duration"].isna().all()

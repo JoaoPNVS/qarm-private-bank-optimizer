@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import backtest as btm, data, optimizer as opt, profiling as prof, risk
+from src import estimators as est, backtest as btm, data, optimizer as opt, profiling as prof, risk
 from tests.helpers import satisfied
 
 
@@ -15,7 +15,7 @@ def inputs():
 @pytest.fixture(scope="module")
 def estimates(inputs):
     uni, ret, rf = inputs
-    return btm.estimates_by_date(ret, rf, uni["asset_class"], btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly"))
+    return btm.estimates_by_date(ret, rf, est.shrinkage_groups(uni), btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly"))
 
 
 @pytest.fixture(scope="module")
@@ -109,3 +109,15 @@ def test_performance_metrics():
     assert np.isclose(m["max_drawdown"], (wealth / wealth.cummax() - 1).min())
     assert np.isclose(m["annual_return"], wealth.iloc[-1] ** (12 / 5) - 1)
     assert np.isclose(m["sharpe"], r.mean() * 12 / (r.std() * np.sqrt(12)))
+
+
+@pytest.mark.parametrize("profile", prof.PROFILES)
+def test_default_constraints_feasible_at_every_rebalancing(inputs, estimates, profile):
+    # bond floor without BIL/FLOT (cash equivalents), 15% per bond fund, duration and IG limits;
+    # quarterly dates contain the semi-annual and annual ones and feasibility does not depend on w_prev
+    uni, ret, rf = inputs
+    res = btm.run_backtest(ret, rf, uni, prof.default_constraints(profile), estimates=estimates)
+    assert not res.events and (res.rebalances["status"] == "ok").all()
+    bond = uni["asset_class"] == "Bond"
+    floor = prof.SPECS[profile].min_bonds
+    assert (res.weights.loc[res.rebalances.index, bond[res.weights.columns].values].sum(axis=1) >= floor - 1e-6).all()

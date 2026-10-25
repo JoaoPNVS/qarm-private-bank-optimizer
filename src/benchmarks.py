@@ -18,7 +18,7 @@ import pandas as pd
 from src.estimators import Estimates
 
 EQUITY_LEG, BOND_LEG = "SPY", "AGG"
-BENCHMARK_CLASS = {EQUITY_LEG: "Equity", BOND_LEG: "Bond"}
+BENCHMARK_CLASS = {EQUITY_LEG: "Equity", BOND_LEG: "Bond Intermediate"}  # AGG duration ~6y
 
 
 def profile_benchmark_returns(equity_share: float, benchmarks: pd.DataFrame) -> pd.Series:

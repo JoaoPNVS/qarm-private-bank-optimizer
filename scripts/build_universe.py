@@ -53,7 +53,9 @@ FIXED_ASSETS = [
     ("EEM", "iShares MSCI Emerging Markets ETF", "Equity", "International", "ETF", True, ""),
     # USD bond ETFs as market segments (bond_type). IGSB / IGIB replace VCSH / VCIT: same segments,
     # history from 2007-01 instead of 2009-11. VCLT, BNDX and FLOT have no older equivalent.
-    ("BIL", "SPDR Bloomberg 1-3 Month T-Bill ETF", "Bond", "Bonds", "ETF", False, "Treasury"),
+    # BIL and FLOT are cash equivalents (duration ~0): asset_class Cash, so they count in the cash
+    # cap and not in the bond floor; they keep their fund tags.
+    ("BIL", "SPDR Bloomberg 1-3 Month T-Bill ETF", "Cash", "Cash equivalents", "ETF", False, "Treasury"),
     ("SHY", "iShares 1-3 Year Treasury Bond ETF", "Bond", "Bonds", "ETF", False, "Treasury"),
     ("IEI", "iShares 3-7 Year Treasury Bond ETF", "Bond", "Bonds", "ETF", False, "Treasury"),
     ("IEF", "iShares 7-10 Year Treasury Bond ETF", "Bond", "Bonds", "ETF", False, "Treasury"),
@@ -67,7 +69,7 @@ FIXED_ASSETS = [
     ("EMB", "iShares J.P. Morgan USD Emerging Markets Bond ETF", "Bond", "Bonds", "ETF", False, "EM USD"),
     ("BNDX", "Vanguard Total International Bond ETF (USD hedged)", "Bond", "Bonds", "ETF", False, "International hedged"),
     ("TIP", "iShares TIPS Bond ETF", "Bond", "Bonds", "ETF", False, "TIPS"),
-    ("FLOT", "iShares Floating Rate Bond ETF", "Bond", "Bonds", "ETF", False, "Floating rate"),
+    ("FLOT", "iShares Floating Rate Bond ETF", "Cash", "Cash equivalents", "ETF", False, "Floating rate"),
     ("GLD", "SPDR Gold Shares", "Commodity", "Gold", "ETF", False, ""),
     ("CASH_USD", "Cash USD (3-month T-bill)", "Cash", "Cash", "Cash", False, ""),
 ]
@@ -168,7 +170,7 @@ def main() -> None:
     stocks = stocks.assign(asset_class="Equity", vehicle="Stock", bond_type="",
                            is_EM=stocks.index.isin(EM_COMPANIES)).sort_values(["sector", "name"])
     fixed = pd.DataFrame(FIXED_ASSETS, columns=COLUMNS[:7]).set_index("ticker").assign(isin_country="US", index="")
-    tags = pd.DataFrame({t: bond_tags(t) for t in fixed.index[fixed["asset_class"] == "Bond"]}).T
+    tags = pd.DataFrame({t: bond_tags(t) for t in fixed.index if t in BOND_CHARACTERISTICS}).T
     if set(tags.index) != set(BOND_CHARACTERISTICS):
         sys.exit("ERROR: every bond ETF needs an entry in BOND_CHARACTERISTICS (and vice versa)")
     fixed = fixed.join(tags)

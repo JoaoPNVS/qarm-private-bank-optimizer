@@ -16,7 +16,7 @@ def universe():
 @pytest.fixture(scope="module")
 def estimates(universe):
     ret = data.load_returns()
-    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), universe["asset_class"])
+    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), est.shrinkage_groups(universe))
 
 
 def test_extreme_answers():
