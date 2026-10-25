@@ -106,3 +106,95 @@ def test_unexpected_error_in_the_optimisation(monkeypatch):
     at = run_app({("slider", "Balanced.stock"): 7})          # new inputs, so the cache is bypassed
     assert not at.exception
     assert any("unexpected error" in e.value for e in at.error)
+
+
+# --- QA regression suite: edge cases, no stale values, cross-tab consistency -------------------
+
+OPTIONAL = ["min_bonds", "max_cash", "em_equity_cap", "max_stock_weight", "max_etf_weight",
+            "max_sector_weight", "exclusions"]
+
+
+def holdings(at):
+    return next(df.value for df in at.dataframe if "Amount (USD)" in df.value.columns)
+
+
+def metric(at, label):
+    return next(m.value for m in at.metric if m.label == label)
+
+
+def clean_or_clear(at):
+    """No traceback, and every error is a user-facing explanation."""
+    assert not at.exception
+    for e in at.error:
+        assert "cannot all be satisfied" in e.value or "could not run" in e.value, e.value
+
+
+@pytest.mark.parametrize("profile", ["Conservative", "Balanced", "Growth", "Dynamic"])
+def test_all_optional_constraints_off(profile):
+    widgets = {("selectbox", "profile"): profile}
+    widgets.update({("toggle", f"{profile}.{key}.on"): False for key in OPTIONAL})
+    at = run_app(widgets)
+    assert not at.exception and not at.error
+    assert np.isclose(holdings(at)["Weight"].sum(), 1)
+
+
+@pytest.mark.parametrize("widgets", [
+    {("slider", "Balanced.stock"): 1},
+    {("slider", "Balanced.sector"): 5},
+    {("slider", "Balanced.etf"): 5},           # 40% bonds impossible at 5% per fund
+    {("slider", "Balanced.vol"): 2.0},
+    {("slider", "Balanced.vol"): 25.0},
+    {("slider", "Balanced.bonds"): 100},       # feasible today, not in 2008 (four bond funds)
+    {("slider", "Balanced.cash"): 0},
+    {("slider", "Balanced.em"): 0},
+], ids=lambda w: "-".join(f"{k[1]}={v}" for k, v in w.items()))
+def test_edge_cases_never_crash(widgets):
+    clean_or_clear(run_app(widgets))
+
+
+def test_exclude_all_tech():
+    at = run_app({("multiselect", "Balanced.excl.sectors"): ["Information Technology"]})
+    assert not at.exception and not at.error
+    h = holdings(at)
+    assert h.loc[h["Sector / type"] == "Information Technology", "Weight"].sum() == 0
+
+
+def test_exclude_all_stocks():
+    from src import data
+    uni = data.load_universe()
+    at = run_app({("multiselect", "Balanced.excl.tickers"): list(uni.index[uni["vehicle"] == "Stock"])})
+    clean_or_clear(at)
+    assert set(holdings(at).index) <= set(uni.index[uni["vehicle"] != "Stock"])
+
+
+def test_holdings_consistent_with_wealth():
+    at = run_app()
+    h = holdings(at)
+    assert np.isclose(h["Weight"].sum(), 1) and np.isclose(h["Amount (USD)"].sum(), 5_000_000)
+
+
+@pytest.mark.parametrize("wealth", [100_000, 1_000_000_000])
+def test_wealth_extremes_scale_everything(wealth):
+    at = run_app()
+    base = backtest_metrics(at)["Final wealth (USD)"] / 5_000_000
+    at.sidebar.number_input[0].set_value(wealth)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
+    assert np.allclose(backtest_metrics(at)["Final wealth (USD)"] / wealth, base)
+    assert np.isclose(holdings(at)["Amount (USD)"].sum(), wealth)
+
+
+def test_changes_propagate_no_stale_cache():
+    at = run_app()
+    r0, m0 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
+    at.slider(key="Balanced.stock").set_value(3)
+    at.run(timeout=TIMEOUT)
+    r1, m1 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
+    assert r1 != r0 and m1.loc["Strategy", "Annual return"] != m0.loc["Strategy", "Annual return"]
+    assert np.isclose(m1.iloc[1]["Annual return"], m0.iloc[1]["Annual return"])  # benchmark unaffected
+    at.selectbox(key="bt.freq").set_value("Annual")
+    at.run(timeout=TIMEOUT)
+    assert backtest_metrics(at).loc["Strategy", "Turnover p.a."] < m1.loc["Strategy", "Turnover p.a."]
+    at.number_input(key="bt.tc").set_value(50)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
