@@ -111,6 +111,19 @@ def run_backtest(profile: str, cons_json: str, freq: str):
     return res, ew, series
 
 
+@st.cache_data(show_spinner="Simulating 5,000 wealth paths...")
+def simulate(profile: str, cons_json: str, years: int, wealth: float):
+    """Block bootstrap of today's portfolio and of the profile benchmark on the same historical months."""
+    universe, returns, rf, bench = load_data()
+    res = optimise(profile, cons_json)[0]
+    if not res.ok:
+        raise ValueError(res.message)
+    hist = pd.concat([risk.portfolio_history(res.weights, returns),
+                      bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity, bench)], axis=1).dropna()
+    hist.columns = ["Portfolio", "Benchmark"]
+    return risk.wealth_simulation(hist, wealth, years), hist.index[0], hist.index[-1], len(hist)
+
+
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
     """Percent slider. While it shows the (rounded) default, the exact default is returned, so
     e.g. the 1/3 emerging-markets limit is not silently turned into 33%."""
@@ -452,4 +465,45 @@ with tabs[3], guarded("Backtest"):
                         yaxis_range=[0, 100])
         st.plotly_chart(fig_layout(f, 360), width="stretch")
 with tabs[4], guarded("Simulation"):
-    st.info("The wealth simulation will be added in the next step.")
+    st.subheader(f"Wealth simulation — {profile} profile, starting with {usd(wealth)}")
+    if require_ok(res):
+        years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")
+        try:
+            sim, h_start, h_end, n_hist = simulate(profile, cons_json, years, float(wealth))
+        except EXPECTED_ERRORS as exc:
+            st.error(f"The simulation could not run: {exc}")
+            sim = None
+        if sim is not None:
+            rows = {name: {"Median": v["median"], "Pessimistic (5%)": v["p5"], "Optimistic (95%)": v["p95"],
+                           "Probability of losing money": v["prob_loss"]} for name, v in sim.items()}
+            table = pd.DataFrame(rows).T.rename(index={"Portfolio": "Recommended portfolio",
+                                                       "Benchmark": bench_label(profile)})
+            p_, b_ = sim["Portfolio"], sim["Benchmark"]
+            c = st.columns(4)
+            c[0].metric(f"Median wealth in {years} years", usd(p_["median"]),
+                        f"{usd(p_['median'] - b_['median'])} vs benchmark")
+            c[1].metric("Pessimistic scenario (5%)", usd(p_["p5"]))
+            c[2].metric("Optimistic scenario (95%)", usd(p_["p95"]))
+            c[3].metric("Probability of losing money", pct(p_["prob_loss"]),
+                        f"{(p_['prob_loss'] - b_['prob_loss']) * 100:+.1f} pp vs benchmark", delta_color="inverse")
+            st.dataframe(table.style.format({"Median": lambda x: usd(x), "Pessimistic (5%)": lambda x: usd(x),
+                                             "Optimistic (95%)": lambda x: usd(x),
+                                             "Probability of losing money": "{:.1%}"}), width="stretch")
+            f = go.Figure()
+            for name, clr, fill in (("Benchmark", GREY, "rgba(163,173,184,0.25)"), ("Portfolio", NAVY, "rgba(31,59,87,0.20)")):
+                b = sim[name]["bands"]
+                x = b.index / 12
+                label_ = "Recommended portfolio" if name == "Portfolio" else bench_label(profile)
+                f.add_trace(go.Scatter(x=x, y=b["p95"], line=dict(width=0), showlegend=False, hoverinfo="skip"))
+                f.add_trace(go.Scatter(x=x, y=b["p5"], fill="tonexty", fillcolor=fill, line=dict(width=0),
+                                       name=f"{label_}: 5%-95% range"))
+                f.add_trace(go.Scatter(x=x, y=b["p50"], line=dict(color=clr, width=3), name=f"{label_}: median"))
+            f.update_layout(xaxis_title="Years", yaxis_title="Wealth (USD)", yaxis_type="log",
+                            title="Range of possible outcomes")
+            st.plotly_chart(fig_layout(f, 460), width="stretch")
+            st.caption(f"5,000 scenarios built by drawing random 12-month blocks of the actual monthly returns of "
+                       f"today's portfolio (weights kept constant) and of its benchmark, on the same months: "
+                       f"{h_start:%B %Y} – {h_end:%B %Y} ({n_hist / 12:.1f} years of history, limited by the "
+                       "youngest holding). Fees and taxes are ignored. "
+                       "The simulation inherits the survivorship bias of the stock list (today's winners, picked "
+                       "with hindsight), so the portfolio's outcomes are optimistic; the benchmark's are not.")

@@ -148,8 +148,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
   It has the same survivorship bias, so the gap to the strategy measures what the optimisation
   adds. Shown in every backtest table and chart, with a plain-language "How to read these
   results" box for the client.
-- **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks) of the client's
-  wealth over 5-20 years: median, 5% and 95% paths, versus the benchmark.
+- **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
+  fixed seed) of the client's wealth over 5-20 years, starting from the sidebar wealth. History =
+  today's portfolio weights (rebalanced monthly) applied to the months where every holding has a
+  return (limited by the youngest holding), and the profile benchmark on the SAME months; both
+  are resampled with the same blocks. Shown: median, 5% and 95% outcomes, probability of ending
+  below the initial wealth, for the portfolio and the benchmark. The simulation inherits the
+  survivorship bias (stated in the app).
 
 ## App (`app.py`, five tabs)
 1. **Client Profile** — questionnaire and resulting profile, with the reasons.
@@ -161,7 +166,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
    maturity bucket and credit quality, table of bond funds (`src/bonds.py`).
 4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
    ex-ante vs realised volatility.
-5. **Simulation** — wealth fan chart and percentiles vs benchmark.
+5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes and probability of loss vs benchmark.
 
 ## Code organisation
 ```

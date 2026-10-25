@@ -218,3 +218,23 @@ def test_backtest_shows_equal_weight_and_how_to_read():
     assert list(m.index) == ["Strategy", "Equal weight (same universe)", "Benchmark (60% SPY / 40% AGG)", "SPY"]
     assert m.loc["Equal weight (same universe)", "Turnover p.a."] > 0 and m.loc["Strategy", "Trading costs p.a."] > 0
     assert any("How to read these results" in md.value for md in at.markdown)
+
+
+def test_simulation_tab():
+    at = run_app()
+    labels = {m.label: m.value for m in at.metric}
+    assert "Median wealth in 10 years" in labels and "Probability of losing money" in labels
+    sim = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    assert list(sim.index) == ["Recommended portfolio", "Benchmark (60% SPY / 40% AGG)"]
+    assert (sim["Pessimistic (5%)"] < sim["Median"]).all() and (sim["Median"] < sim["Optimistic (95%)"]).all()
+    at.slider(key="sim.years").set_value(20)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
+    assert "Median wealth in 20 years" in {m.label for m in at.metric}
+    sim20 = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    at.sidebar.number_input[0].set_value(1_000_000)
+    at.run(timeout=TIMEOUT)
+    sim20_1m = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    money = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
+    assert np.allclose(sim20_1m[money], sim20[money] / 5)  # same scenarios, wealth scales linearly
+    assert np.allclose(sim20_1m["Probability of losing money"], sim20["Probability of losing money"])
