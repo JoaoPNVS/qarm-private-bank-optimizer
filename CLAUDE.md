@@ -1,11 +1,11 @@
-# Swiss Private Client Optimizer — QARM II project
+# Private Client Portfolio Optimizer — QARM II project
 
 ## What this project is
 A Streamlit web app for the HEC Lausanne course *Quantitative Asset and Risk Management II*.
-We act as a Swiss private bank / wealth manager. Our client is a **demanding Swiss private
-client (CHF-based) with many investment constraints**. The app builds an optimal constrained
-portfolio (maximum expected return under the profile's volatility cap), backtests it
-and simulates the client's wealth.
+We act as an **international private bank**. Our clients are international private clients
+whose reference currency is the **USD**. The app profiles the client, builds the portfolio with
+the highest expected return within the client's risk budget and constraints, backtests the
+strategy and simulates the client's wealth.
 
 Grading criteria (from the professor) — every feature should serve one of these:
 1. Content: complexity of client & data, strategy covers the client's needs, uses course tools
@@ -14,99 +14,121 @@ Grading criteria (from the professor) — every feature should serve one of thes
    live questions (so the app must make "what if" changes easy).
 3. Web app: design, interactivity, completeness, no technical issues (must never crash).
 
-## The client
-- Swiss resident, reference currency **CHF**. All returns are converted to CHF.
-- Risk profile from an **LSFIN/FIDLEG-style suitability questionnaire** (horizon, loss tolerance,
-  experience, income stability, objective) → profile Conservative / Balanced / Growth / Dynamic →
-  maps to a volatility cap (risk budget) and to default constraint values.
-  Implemented in `src/profiling.py` (7 questions: capacity / willingness / knowledge; profile =
-  lower of capacity and willingness, knowledge cap, <3y horizon knock-out; each profile has a volatility cap and a CHF benchmark).
-- Client constraints (simple, explainable, all editable in the app; `src/optimizer.py`):
-  - Maximum volatility = the profile's risk budget (mandatory)
-  - Max weight per stock (default 8%; bond ETFs and cash are not capped)
-  - Max weight per equity sector (default 40%)
-  - Exclusions of sectors or individual companies
-  - Optional minimum share in bonds + cash (off by default, suggested level per profile)
+## Currency
+- Everything is in **USD**: prices, returns, risk-free rate, benchmarks, client wealth.
+- **No FX conversion anywhere** in the code or the data pipeline. All assets are USD-listed.
 
-## Data (no paid data — yfinance, plus Wikipedia/SNB for reference lists and the risk-free rate)
-- **Universe** (`data/universe.csv`, built once by `scripts/build_universe.py`, snapshot date in
-  `data/universe_as_of.txt`): 150 US-listed stocks = all Nasdaq-100 members + the largest other
-  S&P 500 members by market cap (one share class per company: GOOGL, FOXA, NWSA kept), each
-  with its GICS sector; 3 Swiss government bond ETFs (iShares CSBGC3/CSBGC7/CSBGC0, 0-3y,
-  3-7y, 7-15y); synthetic CASH_CHF earning SARON. A few Nasdaq-100 members are foreign
-  companies listed in the US (ASML, ARM, PDD, CCEP, FER, TRI, NBIS...); `isin_country` is the
-  ISIN prefix, not the headquarters.
-- **Benchmarks** (`src/benchmarks.py`): SPY converted to CHF (`data/benchmarks_chf.parquet`, not
-  investable), and one benchmark per profile = SPY (CHF) / Swiss govt bonds 3-7y (CSBGC7.SW)
-  rebalanced monthly: Conservative 30/70, Balanced 60/40, Growth 80/20, Dynamic 100/0 (mixed
-  benchmarks start 2008-02). Ex-ante comparisons estimate SPY jointly with the assets (same
-  Ledoit-Wolf fit, mean shrunk toward the equity grand mean); SPY is never investable.
-- **Volatility caps** calibrated on the benchmarks: historical benchmark volatility 2008-02 to
-  2026-09 rounded up to the next percent -> Conservative 6%, Balanced 10%, Growth 13%,
-  Dynamic 16% (benchmark vols 5.1 / 9.5 / 12.6 / 15.7%). The portfolio thus takes the same
-  risk as the benchmark it is compared with.
-- Prices: yfinance daily adjusted close (dividends reinvested) -> month-end, from 2003.
-  Everything is converted to CHF with USDCHF=X (USD assets have CHF returns from 2003-10).
-  Only complete months are kept.
-- Eligibility: an asset enters the optimisation only once it has a complete 60-month history
-  (recent IPOs/spin-offs such as ARM, CRWV, GEV, SPCX wait; CHF bond ETFs have returns from
-  2008-02, the 0-3y from 2009-08, so they become eligible in 2013-01 and 2014-07).
-- Data checks in `download_data.py`: abort on a monthly CHF move above +200% (bad tick), print
-  moves above 100% for manual review (all reviewed real, e.g. PLTR 2020-11, MRNA 2026-08 on
-  40x normal volume). `data_start` in universe.csv can cut corrupted early history.
-- Risk-free: **SARON from the SNB data portal** (cube `zimoma`, free, no API key), downloaded by
-  the same script into `data/rf_chf.parquet`. **Documented exception to the "yfinance only" rule:**
-  yfinance has no reliable CHF short rate. Monthly rf_t = SARON_{t-1} / 1200 (rate known at the
-  start of the month). The app offers a user-settable constant annual rate as fallback
-  (`src.data.constant_rf`).
-- **Survivorship bias (important limitation).** The universe is TODAY's index membership applied
-  to the past. Companies that went bankrupt, were acquired, shrank or left the indices since
-  2003 (Lehman, Yahoo, Twitter, ...) are missing, and today's members are by construction the
-  ones that grew. Any backtest on this universe therefore overstates what a real investor could
-  have earned, and the stock-picking optimiser benefits most because it overweights past winners.
-  SPY (CHF) is free of this bias, so outperformance versus SPY must be read as an UPPER bound.
-  A clean study would need point-in-time constituents (e.g. CRSP), which are not freely available.
+## The client
+- Suitability questionnaire (`src/profiling.py`): 7 questions, each answer scored 1-4, on three
+  dimensions — risk CAPACITY (horizon, income stability, share of wealth), risk WILLINGNESS
+  (objective, tolerable loss, reaction to a drawdown) and KNOWLEDGE & experience. No reference
+  to any national regulation.
+- Mapping (explainable to the client): capacity and willingness averages map to a level
+  (<1.75 Conservative, <2.50 Balanced, <3.25 Growth, otherwise Dynamic); the profile is the
+  LOWER of the two; knowledge caps it ("none" -> at most Balanced, "basic" -> at most Growth);
+  a horizon below 3 years always gives Conservative.
+- Each profile sets a **volatility cap** (risk budget) and a **floor on bonds + cash**:
+
+  | Profile      | Vol cap | Bonds + cash floor | Benchmark (SPY / USD bonds) |
+  |--------------|--------:|-------------------:|-----------------------------|
+  | Conservative |      6% |                70% | 30 / 70                     |
+  | Balanced     |     10% |                40% | 60 / 40                     |
+  | Growth       |     13% |                20% | 80 / 20                     |
+  | Dynamic      |     16% |                 0% | 100 / 0                     |
+
+  Calibration rule for the vol caps: historical volatility of the profile benchmark rounded UP
+  to the next percent, so the optimised portfolio takes the same risk as its benchmark. The
+  values above were validated on the previous data; **re-check them with the USD benchmarks**
+  (tested in `tests/test_benchmarks.py`) and report any difference to the team before changing.
+  The bonds + cash floor equals the benchmark's bond share.
+
+## Client constraints (`src/optimizer.py`; simple, explainable, all editable in the app)
+- Maximum volatility = the profile's risk budget (mandatory).
+- Minimum share in bonds + cash = the profile's floor (active by default, can be changed).
+- Max weight per single stock: 8% (ETFs and cash are not capped by this rule).
+- Max weight per equity sector: 40%.
+- Emerging markets ≤ 1/3 of the equity allocation (linear form: EM ≤ (1/3)·equities).
+- Exclusions of sectors or individual companies.
+- Infeasibility diagnosis: the optimiser never crashes; a deletion filter names the minimal set
+  of conflicting constraints and the ones whose removal alone restores feasibility.
+
+## Data (yfinance only; Wikipedia for the constituent snapshot)
+- **Universe** (`data/universe.csv`, one file, each asset tagged with asset_class, sector,
+  is_EM, bond_type):
+  - the 150 current US stocks (all Nasdaq-100 members + the largest other S&P 500 members,
+    one share class per company, GICS sector), built once by `scripts/build_universe.py`
+    (snapshot date in `data/universe_as_of.txt`);
+  - international equity ETFs: Europe, Japan, emerging markets (proposed VGK, EWJ, EEM);
+  - USD bond ETFs by `bond_type`: short-term (SHY), Treasury 7-10y (IEF), corporate investment
+    grade (LQD), high yield (HYG), TIPS (TIP);
+  - gold (GLD);
+  - CASH_USD, synthetic, earning the 3-month T-bill.
+- **Risk-free**: 3-month T-bill yield `^IRX` (yfinance). Monthly rf_t = IRX_{t-1} / 1200 (rate
+  known at the start of the month). CASH_USD earns rf: zero excess return, zero variance.
+- **Benchmarks** (`src/benchmarks.py`, not investable): SPY, and one benchmark per profile =
+  SPY / US aggregate bonds (proposed AGG) rebalanced monthly, shares as in the table above.
+- Prices: yfinance daily adjusted close (dividends reinvested) -> month-end. Only complete
+  months are kept.
+- **Eligibility**: an asset enters the optimisation only once it has a complete 60-month
+  history (recent IPOs/spin-offs and young ETFs wait).
+- Data checks in `scripts/download_data.py`: abort on a monthly move above +200% (bad tick),
+  print moves above 100% for manual review; `data_start` in universe.csv can cut corrupted
+  early history.
+- **Survivorship bias (important limitation).** The stock universe is TODAY's index membership
+  applied to the past. Companies that went bankrupt, were acquired, shrank or left the indices
+  (Lehman, Yahoo, Twitter, ...) are missing, and today's members are by construction the ones
+  that grew. Any backtest on this universe overstates what a real investor could have earned,
+  and the optimiser benefits most because it overweights past winners. SPY is free of this
+  bias, so outperformance versus SPY must be read as an UPPER bound. A clean study would need
+  point-in-time constituents (e.g. CRSP), which are not freely available.
 - **Data is downloaded once and saved to `data/*.parquet`, which are committed to the repo.**
-  The Streamlit app reads parquet only — it must never call yfinance at runtime.
+  The Streamlit app reads parquet only — it must never call the network at runtime.
 
 ## Methodology
 - **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully
   invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
   (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
-  The volatility cap is mandatory (without it the problem puts everything in one asset).
-- Expected returns: historical mean over the estimation window (default 60 months), shrunk
-  toward the grand mean of the asset's own class: mu_i = (1 - a) m_i + a m_class, a = 0.5 by
-  default (raw 5-year means are mostly noise; shrinking within each class keeps bonds from
-  inheriting equity returns). See `src/estimators.py`.
-- Covariance: Ledoit-Wolf applied to standardised returns (shrinks correlations toward zero,
-  keeps each asset's sample volatility exactly; the identity target on raw returns would inflate
-  low-risk CHF bonds); CASH_CHF is risk-free (zero variance, zero excess return).
-- Eligibility: an asset enters the optimisation only once it has a complete 60-month history.
-- Removed in the October 2026 redesign: equilibrium returns, Black-Litterman house views,
-  risk-aversion lambda, cost of constraints, efficient frontier / minimum variance.
-- Infeasibility: the optimiser never crashes; a deletion filter names the minimal set of
-  conflicting constraints and the ones whose removal alone restores feasibility. Shadow prices
-  (dual values) of binding constraints are kept, in bps of expected return per +1pp.
-- Solver: CLARABEL with fallback to SCS.
-- Backtest: rolling estimation window (default 60 months, user-adjustable 36–84 months), rebalancing
-  quarterly/semi/annual, transaction costs. Compare with SPY in CHF and the profile benchmark.
-- Risk: annualized vol, Sharpe, max drawdown; Monte Carlo (block bootstrap) for wealth projection.
+- Expected returns: historical mean over the 60-month window, shrunk toward the grand mean of
+  the asset's own class: mu_i = (1 - a) m_i + a m_class, **a = 0.8**. Raw 5-year means are
+  mostly noise and a max-return optimiser piles into past winners; shrinking within each class
+  keeps bonds from inheriting equity returns. See `src/estimators.py`.
+- Covariance: Ledoit-Wolf on standardised returns over the 60-month window (shrinks
+  correlations toward zero and keeps each asset's sample volatility exactly; the identity
+  target on raw returns would inflate low-risk bond volatilities).
+- Solver: cvxpy with CLARABEL, fallback SCS.
+- **Backtest** (`src/backtest.py`): rolling 60-month window, rebalancing quarterly (or
+  semi-annual / annual), transaction costs 10 bps per unit traded. Compared with SPY and the
+  profile benchmark: annualised return, volatility, Sharpe, max drawdown. It must compare the
+  **ex-ante volatility promised** at each rebalancing with the **realised volatility**.
+- **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks) of the client's
+  wealth over 5-20 years: median, 5% and 95% paths, versus the benchmark.
+
+## App (`app.py`, five tabs)
+1. **Client Profile** — questionnaire and resulting profile, with the reasons.
+2. **Constraints** — each constraint with its toggle/slider, preset to the profile defaults;
+   clear message naming the conflicting constraints when infeasible.
+3. **Portfolio** — weights vs benchmark, split equities / bonds / cash, by sector, bonds by
+   type (short-term, Treasury, corporate IG, high yield, TIPS), expected return, volatility,
+   Sharpe vs benchmark.
+4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
+   ex-ante vs realised volatility.
+5. **Simulation** — wealth fan chart and percentiles vs benchmark.
 
 ## Code organisation
 ```
-app.py                 # Streamlit UI only — no heavy logic
-src/data.py            # loading parquet, CHF conversion, universe tags
-src/estimators.py      # mu and covariance estimators
-src/optimizer.py       # cvxpy problem builder, constraint objects, infeasibility diagnosis
-src/benchmarks.py      # SPY (CHF) and SPY/CHF-bond profile benchmarks, ex-ante comparison
-src/backtest.py        # rolling backtest engine
-src/risk.py            # metrics, VaR/CVaR, risk contributions, stress tests, Monte Carlo
-src/profiling.py       # questionnaire -> profile -> volatility cap + default constraints
-src/report.py          # PDF report (charts drawn with matplotlib — no kaleido)
+app.py                     # Streamlit UI only — no heavy logic
+src/data.py                # loading parquet, universe tags
+src/estimators.py          # shrunk means and Ledoit-Wolf covariance, eligibility window
+src/optimizer.py           # cvxpy problem builder, constraint objects, infeasibility diagnosis
+src/benchmarks.py          # SPY and SPY/bond profile benchmarks, ex-ante comparison
+src/backtest.py            # rolling backtest engine
+src/risk.py                # performance metrics, Monte Carlo block bootstrap
+src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, default constraints
+src/report.py              # PDF report (charts drawn with matplotlib — no kaleido)
 scripts/build_universe.py  # constituents snapshot -> data/universe.csv
-scripts/download_data.py
-tests/                 # pytest for optimizer constraints and backtest sanity
-reference/             # friend's app — read-only inspiration, NEVER copy its ERC logic
+scripts/download_data.py   # prices, risk-free rate, benchmarks -> data/*.parquet
+tests/                     # pytest for data, estimators, constraints, profiles, backtest
+reference/                 # friend's app — read-only inspiration, NEVER copy its ERC logic
 ```
 
 ## Rules for Claude Code
@@ -118,6 +140,7 @@ reference/             # friend's app — read-only inspiration, NEVER copy its 
 - Every function that can fail (solver, data) must fail gracefully with a clear message in the app.
 - Cache expensive computations with `st.cache_data`.
 - After each feature: run `pytest` and `streamlit run app.py` headless smoke test before saying done.
+- One commit per finished and tested step, with a clear message.
 - Keep `requirements.txt` pinned and deployable on Streamlit Community Cloud.
 - Target **Python 3.12** (local `.venv` and Streamlit Cloud "Advanced settings"). The pinned set
   must stay free of deprecation warnings: `pytest.ini` turns DeprecationWarning/FutureWarning
