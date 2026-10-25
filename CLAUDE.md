@@ -18,6 +18,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - Risk profile from an **LSFIN/FIDLEG-style suitability questionnaire** (horizon, loss tolerance,
   experience, income stability, objective) → profile Conservative / Balanced / Growth / Dynamic →
   maps to a risk-aversion parameter λ and to default constraint values.
+  Implemented in `src/profiling.py` (7 questions: capacity / willingness / knowledge; profile =
+  lower of capacity and willingness, knowledge cap, <3y horizon knock-out; λ = 0.35 / σ(profile
+  benchmark); each profile's CHF benchmark satisfies its own default constraints).
 - Example constraints (all must be editable in the app):
   - Emerging-market equities ≤ 1/3 of total equity exposure (ratio constraint, linear form)
   - Swiss equities ≥ X% of equity exposure (home bias)
