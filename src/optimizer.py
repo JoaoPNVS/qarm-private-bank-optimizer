@@ -219,6 +219,7 @@ class OptimizationResult:
     sharpe: float = np.nan
     utility: float = np.nan
     turnover: float = np.nan
+    tracking_error: float = np.nan
     duals: pd.DataFrame = field(default_factory=pd.DataFrame)
     diagnosis: InfeasibilityDiagnosis | None = None
     message: str = ""
@@ -264,9 +265,14 @@ def portfolio_stats(weights: pd.Series, data: ProblemData) -> dict:
     vol = float(np.sqrt(max(w @ data.cov.values @ w, 0.0)))
     turnover = float(np.abs(w - data.w_prev.values).sum()) if data.w_prev is not None else np.nan
     cost = data.tc * turnover if data.w_prev is not None else 0.0
+    te = np.nan
+    if data.benchmark is not None:
+        a = w - data.benchmark.values
+        te = float(np.sqrt(max(a @ data.cov.values @ a, 0.0)))
     return {"expected_return": ret, "volatility": vol,
             "sharpe": ret / vol if vol > TOL else np.nan,
-            "utility": ret - data.risk_aversion / 2 * vol ** 2 - cost, "turnover": turnover}
+            "utility": ret - data.risk_aversion / 2 * vol ** 2 - cost, "turnover": turnover,
+            "tracking_error": te}
 
 
 def _dual_table(pairs: list[tuple[Constraint, Part]]) -> pd.DataFrame:
