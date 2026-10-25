@@ -2,7 +2,7 @@ import importlib
 
 import pytest
 
-MODULES = ["data", "estimators", "optimizer", "benchmarks", "bonds", "backtest", "risk", "profiling", "report"]
+MODULES = ["data", "estimators", "optimizer", "benchmarks", "bonds", "backtest", "risk", "profiling", "report", "team"]
 
 
 @pytest.mark.parametrize("name", MODULES)

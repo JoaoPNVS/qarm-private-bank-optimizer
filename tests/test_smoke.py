@@ -238,3 +238,39 @@ def test_simulation_tab():
     money = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
     assert np.allclose(sim20_1m[money], sim20[money] / 5)  # same scenarios, wealth scales linearly
     assert np.allclose(sim20_1m["Probability of losing money"], sim20["Probability of losing money"])
+
+
+def about_names(at):
+    return [md.value for md in at.markdown if "font-weight:600;font-size:1.1rem" in md.value]
+
+
+def test_about_us_without_photos():
+    at = run_app()
+    assert not at.exception and not at.error
+    cards = about_names(at)
+    assert len(cards) == 6 and any("Joao [NOM]" in c for c in cards)
+    avatars = [md.value for md in at.markdown if "border-radius:50%" in md.value]
+    assert len(avatars) == 6 and all("<div" in a for a in avatars)  # initials avatars, no broken image
+
+
+def test_about_us_with_a_photo(tmp_path, monkeypatch):
+    import base64
+    from src import team
+    # a test team file: one member with a real (1-pixel) photo, one whose photo file is missing
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
+    (team.ROOT / "assets" / "team" / "_test_photo.png").write_bytes(png)
+    try:
+        test_file = tmp_path / "team.json"
+        test_file.write_text('{"members": [{"name": "Test Person", "role": "Role", "description": "d", '
+                             '"photo": "assets/team/_test_photo.png", "linkedin": "https://www.linkedin.com/in/x"}, '
+                             '{"name": "No Photo", "role": "Role", "description": "d", "photo": "assets/team/none.png"}]}',
+                             encoding="utf-8")
+        monkeypatch.setattr(team, "TEAM_FILE", test_file)
+        monkeypatch.setattr(team.load_team, "__defaults__", (test_file,))
+        at = run_app()
+        assert not at.exception and not at.error
+        avatars = [md.value for md in at.markdown if "border-radius:50%" in md.value]
+        assert sum("<img" in a for a in avatars) == 1 and sum("<div" in a for a in avatars) == 1
+        assert any("LinkedIn" in md.value for md in at.markdown)
+    finally:
+        (team.ROOT / "assets" / "team" / "_test_photo.png").unlink()

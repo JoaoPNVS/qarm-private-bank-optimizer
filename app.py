@@ -1,6 +1,7 @@
 """Private Client Portfolio Optimizer — Streamlit UI only (no heavy logic here)."""
 from __future__ import annotations
 
+import html
 import json
 import logging
 from contextlib import contextmanager
@@ -10,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, optimizer as opt, profiling as prof, risk
+from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, optimizer as opt, profiling as prof, risk, team
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide")
 
@@ -180,7 +181,7 @@ with st.sidebar:
                f"Estimates use the last {WINDOW} months. Risk-free: 3-month T-bill, currently "
                f"{rf.iloc[-1] * 12:.2%} p.a.")
 
-tabs = st.tabs(["Client Profile", "Constraints", "Portfolio", "Backtest", "Simulation"])
+tabs = st.tabs(["Client Profile", "Constraints", "Portfolio", "Backtest", "Simulation", "About Us"])
 
 # --- Client Profile --------------------------------------------------------------------------
 
@@ -507,3 +508,45 @@ with tabs[4], guarded("Simulation"):
                        "youngest holding). Fees and taxes are ignored. "
                        "The simulation inherits the survivorship bias of the stock list (today's winners, picked "
                        "with hindsight), so the portfolio's outcomes are optimistic; the benchmark's are not.")
+
+# --- About Us --------------------------------------------------------------------------------
+
+def avatar_html(member: team.Member, size: int = 112) -> str:
+    """Round photo, or a round avatar with the initials when the photo is missing."""
+    uri = team.photo_data_uri(member)
+    style = f"width:{size}px;height:{size}px;border-radius:50%;margin:0.25rem auto 0.75rem auto;display:block;"
+    if uri:
+        return f'<img src="{uri}" alt="{html.escape(member.name)}" style="{style}object-fit:cover;">'
+    return (f'<div style="{style}background:{NAVY};color:#ffffff;display:flex;align-items:center;'
+            f'justify-content:center;font-size:{size // 3}px;font-weight:600;letter-spacing:1px;">'
+            f'{html.escape(team.initials(member.name))}</div>')
+
+
+with tabs[5], guarded("About Us"):
+    st.subheader("About this project")
+    st.markdown(
+        "We play the role of an **international private bank** advising clients whose reference currency is "
+        "the US dollar. The app turns a short suitability questionnaire into a risk profile, then builds the "
+        "portfolio with the highest expected return that stays within the client's volatility budget and "
+        "investment constraints. Every recommendation is backtested and its future range of outcomes simulated, "
+        "so the client can see both the potential and the risks. It was built for the course *Quantitative "
+        "Asset and Risk Management II* at HEC Lausanne.")
+    members, repository, team_error = team.load_team()
+    if team_error:
+        st.warning(team_error)
+    st.markdown("#### The team")
+    for start in range(0, len(members), 3):
+        cols = st.columns(3, gap="medium")
+        for col, m in zip(cols, members[start:start + 3]):
+            with col.container(border=True):
+                st.markdown(avatar_html(m), unsafe_allow_html=True)
+                st.markdown(f'<div style="text-align:center;font-weight:600;font-size:1.1rem;">{html.escape(m.name)}</div>'
+                            f'<div style="text-align:center;color:{NAVY};font-size:0.9rem;margin-bottom:0.5rem;">'
+                            f'{html.escape(m.role)}</div>'
+                            f'<div style="text-align:center;color:#4a5560;font-size:0.9rem;">{html.escape(m.description)}</div>',
+                            unsafe_allow_html=True)
+                if m.linkedin:
+                    st.markdown(f'<div style="text-align:center;margin-top:0.5rem;"><a href="{html.escape(m.linkedin)}" '
+                                f'target="_blank">LinkedIn</a></div>', unsafe_allow_html=True)
+    if repository:
+        st.markdown(f"Source code: [{repository}]({repository})")

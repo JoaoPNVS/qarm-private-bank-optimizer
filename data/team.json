@@ -1,0 +1,47 @@
+{
+  "repository": "",
+  "members": [
+    {
+      "name": "Joao [NOM]",
+      "role": "Project Lead & Portfolio Strategy",
+      "description": "Coordinates the project and designs the overall portfolio construction approach.",
+      "photo": "assets/team/joao.jpg",
+      "linkedin": ""
+    },
+    {
+      "name": "Francisco [NOM]",
+      "role": "Client Profiling & Suitability",
+      "description": "Builds the suitability questionnaire and translates answers into risk profiles.",
+      "photo": "assets/team/francisco_profiling.jpg",
+      "linkedin": ""
+    },
+    {
+      "name": "Francisco [NOM]",
+      "role": "Constraints & Optimization",
+      "description": "Implements the client constraints and the volatility-capped optimisation.",
+      "photo": "assets/team/francisco_optimization.jpg",
+      "linkedin": ""
+    },
+    {
+      "name": "Ruben [NOM]",
+      "role": "Fixed Income",
+      "description": "Designs the bond sleeve: segments, duration, credit quality and limits.",
+      "photo": "assets/team/ruben.jpg",
+      "linkedin": ""
+    },
+    {
+      "name": "Alexandre [NOM]",
+      "role": "Backtesting & Performance",
+      "description": "Runs the rolling backtests and compares the strategy with its benchmarks.",
+      "photo": "assets/team/alexandre.jpg",
+      "linkedin": ""
+    },
+    {
+      "name": "Dimitri [NOM]",
+      "role": "Risk & Monte Carlo Simulation",
+      "description": "Measures portfolio risk and simulates the client's future wealth.",
+      "photo": "assets/team/dimitri.jpg",
+      "linkedin": ""
+    }
+  ]
+}

@@ -156,7 +156,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   below the initial wealth, for the portfolio and the benchmark. The simulation inherits the
   survivorship bias (stated in the app).
 
-## App (`app.py`, five tabs)
+## App (`app.py`, six tabs)
 1. **Client Profile** — questionnaire and resulting profile, with the reasons.
 2. **Constraints** — each constraint with its toggle/slider, preset to the profile defaults;
    clear message naming the conflicting constraints when infeasible.
@@ -167,6 +167,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
 4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
    ex-ante vs realised volatility.
 5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes and probability of loss vs benchmark.
+6. **About Us** — short project presentation and one card per team member. Team data lives in ONE
+   editable file, `data/team.json` (name, role, description, photo path, LinkedIn; optional
+   `repository` link). Photos go in `assets/team/`; a missing photo shows a round avatar with the
+   initials (`src/team.py`). No e-mail addresses. Own texts and style, nothing from reference/.
 
 ## Code organisation
 ```
@@ -180,6 +184,7 @@ src/backtest.py            # rolling backtest engine
 src/risk.py                # performance metrics, Monte Carlo block bootstrap
 src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, default constraints
 src/report.py              # PDF report (charts drawn with matplotlib — no kaleido)
+src/team.py                # About Us: team.json loader, photo or initials avatar
 scripts/build_universe.py  # constituents snapshot -> data/universe.csv
 scripts/download_data.py   # prices, risk-free rate, benchmarks -> data/*.parquet
 tests/                     # pytest for data, estimators, constraints, profiles, backtest
