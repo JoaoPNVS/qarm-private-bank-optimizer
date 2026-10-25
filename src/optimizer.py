@@ -94,18 +94,32 @@ def max_volatility(limit: float = 0.10) -> Constraint:
         lambda p: f"Expected annual volatility at most {p['limit']:.0%}.")
 
 
-def max_stock_weight(limit: float = 0.08) -> Constraint:
-    """Cap on each single stock (bond funds and cash are diversified and not capped)."""
+def _cap_per_vehicle(vehicle: str, label: str):
     def build(w, d, p):
-        idx = [i for i, t in enumerate(d.tickers) if d.universe.at[t, "asset_class"] == "Equity"]
-        return [Part("Max stock weight", w[idx] <= p["limit"], [d.tickers[i] for i in idx])] if idx else []
+        idx = [i for i, t in enumerate(d.tickers) if d.universe.at[t, "vehicle"] == vehicle]
+        return [Part(label, w[idx] <= p["limit"], [d.tickers[i] for i in idx])] if idx else []
+    return build
 
+
+def max_stock_weight(limit: float = 0.08) -> Constraint:
+    """Cap on each single stock."""
     return Constraint(
-        "max_stock_weight", "Maximum weight per stock", {"limit": limit}, build,
+        "max_stock_weight", "Maximum weight per stock", {"limit": limit},
+        _cap_per_vehicle("Stock", "Max stock weight"),
         lambda p: f"No single company above {p['limit']:.0%} of the portfolio.")
 
 
+def max_etf_weight(limit: float = 0.20) -> Constraint:
+    """Cap on each ETF (cash is not capped)."""
+    return Constraint(
+        "max_etf_weight", "Maximum weight per ETF", {"limit": limit},
+        _cap_per_vehicle("ETF", "Max ETF weight"),
+        lambda p: f"No single fund above {p['limit']:.0%} of the portfolio.")
+
+
 def max_sector_weight(limit: float = 0.40) -> Constraint:
+    """Cap per equity sector; the international equity ETFs form one group ("International").
+    Bond ETFs, gold and cash are not equities and are not subject to this cap."""
     def build(w, d, p):
         eq = d.universe["asset_class"] == "Equity"
         return [Part(f"{s} <= {p['limit']:.0%}", d.mask(eq & (d.universe["sector"] == s)) @ w <= p["limit"])
@@ -113,7 +127,21 @@ def max_sector_weight(limit: float = 0.40) -> Constraint:
 
     return Constraint(
         "max_sector_weight", "Maximum weight per sector", {"limit": limit}, build,
-        lambda p: f"No equity sector above {p['limit']:.0%} of the portfolio.")
+        lambda p: f"No equity sector (international funds count as one group) above {p['limit']:.0%} "
+                  "of the portfolio.")
+
+
+def em_equity_cap(ratio: float = 1 / 3) -> Constraint:
+    """Emerging markets (EEM, PDD, MELI) at most `ratio` of the equity allocation, linear form
+    EM <= ratio * equities (no division, so it stays convex and holds with zero equities)."""
+    def build(w, d, p):
+        eq = d.universe["asset_class"] == "Equity"
+        return [Part(f"EM <= {p['ratio']:.0%} of equities",
+                     d.mask(eq & d.universe["is_EM"]) @ w <= p["ratio"] * (d.mask(eq) @ w))]
+
+    return Constraint(
+        "em_equity_cap", "Emerging-markets limit", {"ratio": ratio}, build,
+        lambda p: f"Emerging markets at most {p['ratio']:.0%} of the equity allocation.")
 
 
 def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = None) -> Constraint:
@@ -131,7 +159,7 @@ def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = Non
 
 
 def min_defensive(min_share: float = 0.20) -> Constraint:
-    """Minimum share in bonds and cash (optional)."""
+    """Minimum share in bonds and cash (the profile's floor)."""
     def build(w, d, p):
         m = d.mask(d.universe["asset_class"].isin(["Bond", "Cash"]))
         return [Part(f"Bonds + cash >= {p['min_share']:.0%}", m @ w >= p["min_share"])]

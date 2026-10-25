@@ -13,8 +13,10 @@ own class (equities toward the average equity, bonds toward the average bond):
     mu_i = (1 - a) * m_i + a * m_class(i)
 Raw 60-month means are mostly noise (a 25%-volatility stock has a standard error of about 11%
 p.a. on a 5-year mean); a long-only optimiser would pile into the luckiest past winners.
-Shrinking halfway (a = 0.5 by default) keeps the ranking of past performance but halves the
-dispersion. Shrinking within each class matters: toward the global mean, low-risk bonds would
+With a = 0.8 (default) each asset keeps 20% of its own past performance: the ranking is
+preserved but the dispersion is divided by five, which stops the optimiser from concentrating
+on a handful of past winners (with a = 0.5 a Balanced portfolio was 100% equities with an
+ex-ante Sharpe above 2). An asset alone in its class (gold) keeps its own mean. Shrinking within each class matters: toward the global mean, low-risk bonds would
 inherit equity-like returns and absorb the portfolio.
 """
 from __future__ import annotations
@@ -29,7 +31,7 @@ from src.data import CASH_TICKER
 
 MONTHS_PER_YEAR = 12
 DEFAULT_WINDOW = 60
-DEFAULT_MEAN_SHRINKAGE = 0.5
+DEFAULT_MEAN_SHRINKAGE = 0.8
 
 
 class EstimationError(ValueError):

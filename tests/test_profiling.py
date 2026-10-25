@@ -50,8 +50,16 @@ def test_default_portfolio_feasible(profile, universe, estimates):
     cons = prof.default_constraints(profile)
     res = opt.solve(d, cons)
     assert res.ok, res.message
-    assert all(satisfied(c, res.weights, d) for c in cons if c.active)
-    assert not next(c for c in cons if c.key == "min_defensive").active  # optional, off by default
+    assert all(c.active for c in cons) and all(satisfied(c, res.weights, d) for c in cons)
+
+
+def test_bond_floors_and_default_caps():
+    floors = {p: next(c for c in prof.default_constraints(p) if c.key == "min_defensive").params["min_share"]
+              for p in prof.PROFILES}
+    assert floors == {"Conservative": 0.70, "Balanced": 0.40, "Growth": 0.20, "Dynamic": 0.0}
+    params = {c.key: c.params for c in prof.default_constraints("Balanced")}
+    assert params["max_stock_weight"]["limit"] == 0.08 and params["max_etf_weight"]["limit"] == 0.20
+    assert params["max_sector_weight"]["limit"] == 0.40 and abs(params["em_equity_cap"]["ratio"] - 1 / 3) < 1e-12
 
 
 def test_risk_and_return_increase_with_profile(universe, estimates):

@@ -53,10 +53,15 @@ def binding_cases(pdata):
     w = free_solution(pdata)
     uni = pdata.universe
     eq = uni["asset_class"] == "Equity"
-    top_stock = w[eq].idxmax()
+    stocks, etfs = uni["vehicle"] == "Stock", uni["vehicle"] == "ETF"
+    top_stock = w[stocks].idxmax()
     top_sector = w[eq].groupby(uni.loc[eq, "sector"]).sum()
+    em_share = w[eq & uni["is_EM"]].sum() / w[eq].sum()
+    assert em_share > 0 and w[etfs].max() > 0  # otherwise the EM / ETF cases below could not bind
     return [
-        opt.max_stock_weight(w[eq].max() / 2),
+        opt.max_stock_weight(w[stocks].max() / 2),
+        opt.max_etf_weight(w[etfs].max() / 2),
+        opt.em_equity_cap(em_share / 2),
         opt.max_sector_weight(top_sector.max() / 2),
         opt.exclusions(tickers=[top_stock]),
         opt.exclusions(sectors=[top_sector.idxmax()]),

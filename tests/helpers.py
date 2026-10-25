@@ -11,7 +11,11 @@ def satisfied(c, w, d):
     if c.key == "max_volatility":
         return np.sqrt(w @ d.cov @ w) <= p["limit"] + TOL
     if c.key == "max_stock_weight":
-        return w[eq].max() <= p["limit"] + TOL
+        return w[uni["vehicle"] == "Stock"].max() <= p["limit"] + TOL
+    if c.key == "max_etf_weight":
+        return w[uni["vehicle"] == "ETF"].max() <= p["limit"] + TOL
+    if c.key == "em_equity_cap":
+        return w[eq & uni["is_EM"]].sum() <= p["ratio"] * w[eq].sum() + TOL
     if c.key == "max_sector_weight":
         return w[eq].groupby(uni.loc[eq, "sector"]).sum().max() <= p["limit"] + TOL
     if c.key == "exclusions":
