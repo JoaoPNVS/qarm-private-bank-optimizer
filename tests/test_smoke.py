@@ -71,3 +71,13 @@ def test_backtest_benchmark_follows_the_profile():
     assert vols == sorted(vols) and len(set(vols)) == 4 and len(set(rets)) == 4
     assert np.isclose(rows["Dynamic"]["Volatility"], spy["Volatility"])   # 100% SPY by definition
     assert rows["Balanced"]["Annual return"] < spy["Annual return"]
+
+
+def test_app_defaults_match_the_engine_exactly():
+    # untouched sliders must give the profile defaults exactly (e.g. EM <= 1/3, not 33%)
+    from src import backtest as btm, data, profiling as prof
+    uni, ret, rf = data.load_universe(), data.load_returns(), data.load_rf()
+    engine = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"))
+    at = run_app()
+    app_final = backtest_metrics(at).loc["Strategy", "Final wealth (USD)"] / 5_000_000
+    assert np.isclose(app_final, (1 + engine.returns).prod(), rtol=1e-10)

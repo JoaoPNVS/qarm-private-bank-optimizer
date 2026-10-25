@@ -91,10 +91,13 @@ def run_backtest(profile: str, cons_json: str, freq: str, tc: float):
 
 
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
+    """Percent slider. While it shows the (rounded) default, the exact default is returned, so
+    e.g. the 1/3 emerging-markets limit is not silently turned into 33%."""
     fmt = "%.1f%%" if step < 1 else "%d%%"
     cast = float if step < 1 else int
-    return st.slider(label, cast(lo), cast(hi), cast(round(default * 100, 1)), cast(step), format=fmt,
-                     key=key, disabled=disabled) / 100
+    shown = cast(round(default * 100, 1))
+    value = st.slider(label, cast(lo), cast(hi), shown, cast(step), format=fmt, key=key, disabled=disabled)
+    return default if value == shown else value / 100
 
 
 def require_ok(res: opt.OptimizationResult) -> bool:
