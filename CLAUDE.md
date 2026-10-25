@@ -28,28 +28,37 @@ Grading criteria (from the professor) — every feature should serve one of thes
   - Exclusions of sectors or individual companies
   - Optional minimum share in bonds + cash (off by default, suggested level per profile)
 
-## Data (no paid data — everything from yfinance)
-- Investable universe = liquid ETFs + a few Swiss blue chips, chosen so constraints are
-  meaningful (each asset tagged with: asset_class, region, currency, is_EM, is_swiss, sector/ESG flag).
-  Keep the universe definition in ONE file: `data/universe.csv`.
-- FX: USDCHF=X, EURCHF=X (convert to CHF). Monthly frequency, month-end.
+## Data (no paid data — yfinance, plus Wikipedia/SNB for reference lists and the risk-free rate)
+- **Universe** (`data/universe.csv`, built once by `scripts/build_universe.py`, snapshot date in
+  `data/universe_as_of.txt`): 150 US-listed stocks = all Nasdaq-100 members + the largest other
+  S&P 500 members by market cap (one share class per company: GOOGL, FOXA, NWSA kept), each
+  with its GICS sector; 3 Swiss government bond ETFs (iShares CSBGC3/CSBGC7/CSBGC0, 0-3y,
+  3-7y, 7-15y); synthetic CASH_CHF earning SARON. A few Nasdaq-100 members are foreign
+  companies listed in the US (ASML, ARM, PDD, CCEP, FER, TRI, NBIS...); `isin_country` is the
+  ISIN prefix, not the headquarters.
+- **Benchmark series**: SPY converted to CHF (`data/benchmarks_chf.parquet`, not investable).
+- Prices: yfinance daily adjusted close (dividends reinvested) -> month-end, from 2003.
+  Everything is converted to CHF with USDCHF=X (Yahoo history starts 2003-10, so USD assets
+  have CHF returns from 2003-11). Only complete months are kept.
+- Eligibility: an asset enters the optimisation only once it has a complete 60-month history
+  (recent IPOs/spin-offs such as ARM, CRWV, GEV, SPCX wait; CHF bond ETFs start in 2008-09).
+- Data checks in `download_data.py`: abort on a monthly CHF move above +200% (bad tick), print
+  moves above 100% for manual review (all reviewed real, e.g. PLTR 2020-11, MRNA 2026-08 on
+  40x normal volume). `data_start` in universe.csv can cut corrupted early history.
 - Risk-free: **SARON from the SNB data portal** (cube `zimoma`, free, no API key), downloaded by
   the same script into `data/rf_chf.parquet`. **Documented exception to the "yfinance only" rule:**
   yfinance has no reliable CHF short rate. Monthly rf_t = SARON_{t-1} / 1200 (rate known at the
   start of the month). The app offers a user-settable constant annual rate as fallback
-  (`src.data.constant_rf`). The `CASH_CHF` asset is synthetic and earns this rf.
-- Currency tags: `currency` = economic FX exposure (used by the FX constraint), `listed_currency`
-  = quote currency (used for CHF conversion; only CHF and USD exist, so USDCHF=X suffices).
-  EEM, AAXJ and EMB are tagged `EM-FX` and international funds (BWX, RWX) `Multi`; every
-  currency other than CHF counts as non-CHF exposure (`non_chf` column added by `load_universe`).
-- Data cleaning: `data_start` in universe.csv discards corrupted early Yahoo history
-  (SRECHA.SW before 2011-02, ABBN.SW before 2003). The download script aborts on any monthly
-  CHF return above 60% and warns on daily moves above 25%. Roche is `RO.SW` (ROG.SW is not on
-  Yahoo). Only complete months are kept. Common sample of all 35 assets starts 2011-03.
-- Benchmark: a profile-dependent CHF benchmark (e.g. 60/40 built from universe ETFs).
-- **Data is downloaded once by `scripts/download_data.py` and saved to `data/*.parquet`,
-  which are committed to the repo.** The Streamlit app reads parquet only — it must never call
-  yfinance at runtime (rate limits would break the live demo).
+  (`src.data.constant_rf`).
+- **Survivorship bias (important limitation).** The universe is TODAY's index membership applied
+  to the past. Companies that went bankrupt, were acquired, shrank or left the indices since
+  2003 (Lehman, Yahoo, Twitter, ...) are missing, and today's members are by construction the
+  ones that grew. Any backtest on this universe therefore overstates what a real investor could
+  have earned, and the stock-picking optimiser benefits most because it overweights past winners.
+  SPY (CHF) is free of this bias, so outperformance versus SPY must be read as an UPPER bound.
+  A clean study would need point-in-time constituents (e.g. CRSP), which are not freely available.
+- **Data is downloaded once and saved to `data/*.parquet`, which are committed to the repo.**
+  The Streamlit app reads parquet only — it must never call yfinance at runtime.
 
 ## Methodology
 - **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully

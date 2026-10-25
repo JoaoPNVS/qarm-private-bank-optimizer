@@ -53,9 +53,10 @@ def test_shrinkage_keeps_bonds_below_equities(estimates, universe):
 
 def test_eligibility_drops_short_histories():
     ret = data.load_returns()
-    win = est.estimation_window(ret, pd.Timestamp("2013-06-30"), 60)
-    assert "SRECHA.SW" not in win.columns  # first return 2011-03, < 60 months at 2013-06
-    assert "SPY" in win.columns and not win.isna().any().any()
+    early = est.estimation_window(ret, pd.Timestamp("2015-06-30"), 60)
+    later = est.estimation_window(ret, pd.Timestamp("2018-06-30"), 60)
+    assert "META" not in early.columns and "META" in later.columns  # IPO 2012-05
+    assert "AAPL" in early.columns and not early.isna().any().any()
 
 
 def test_window_errors():

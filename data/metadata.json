@@ -1,8 +1,8 @@
 {
-  "downloaded_at_utc": "2026-10-25T13:59:04+00:00",
+  "downloaded_at_utc": "2026-10-25T15:12:26+00:00",
   "last_month_end": "2026-09-30",
-  "first_return": "1995-02-28",
-  "n_assets": 35,
+  "first_return": "2003-02-28",
+  "n_assets": 154,
   "sources": {
     "prices": "yfinance daily auto_adjust -> month-end",
     "fx": [

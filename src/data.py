@@ -1,7 +1,8 @@
 """Load parquet data, CHF conversion and universe tags.
 
-All files are produced once by scripts/download_data.py; nothing here touches the network.
-Every loader raises DataError with a message that the app can show to the user as-is.
+All files are produced once by scripts/build_universe.py and scripts/download_data.py; nothing
+here touches the network. Every loader raises DataError with a message that the app can show
+to the user as-is.
 """
 from __future__ import annotations
 
@@ -11,9 +12,10 @@ import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CASH_TICKER = "CASH_CHF"
-UNIVERSE_COLUMNS = ["ticker", "name", "asset_class", "region", "currency", "listed_currency",
-                    "is_EM", "is_swiss", "sector", "data_start"]
-ASSET_CLASSES = {"Equity", "Bond", "Alternative", "Real Estate", "Cash"}
+BENCHMARK_TICKER = "SPY"
+UNIVERSE_COLUMNS = ["ticker", "name", "asset_class", "sector", "isin_country", "index",
+                    "listed_currency", "data_start"]
+ASSET_CLASSES = {"Equity", "Bond", "Cash"}
 
 
 class DataError(RuntimeError):
@@ -31,12 +33,11 @@ def _read_parquet(name: str, data_dir: Path) -> pd.DataFrame:
 
 
 def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """Universe with tags, indexed by ticker. `non_chf` flags any foreign-currency exposure
-    (EM-FX and Multi included), which is what the FX constraint counts."""
+    """Investable universe (stocks, Swiss government bond ETFs, CHF cash), indexed by ticker."""
     path = data_dir / "universe.csv"
     if not path.exists():
-        raise DataError("data/universe.csv not found.")
-    uni = pd.read_csv(path, parse_dates=["data_start"])
+        raise DataError("data/universe.csv not found. Run `python scripts/build_universe.py`.")
+    uni = pd.read_csv(path, parse_dates=["data_start"], keep_default_na=False, na_values={"data_start": [""]})
     missing = set(UNIVERSE_COLUMNS) - set(uni.columns)
     if missing:
         raise DataError(f"universe.csv is missing columns {sorted(missing)}")
@@ -45,10 +46,6 @@ def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     bad_class = set(uni["asset_class"]) - ASSET_CLASSES
     if bad_class:
         raise DataError(f"Unknown asset classes {sorted(bad_class)}")
-    for col in ["is_EM", "is_swiss"]:
-        if uni[col].dtype != bool:
-            raise DataError(f"Column '{col}' must contain only True/False")
-    uni["non_chf"] = uni["currency"] != "CHF"
     return uni.set_index("ticker")
 
 
@@ -59,6 +56,11 @@ def load_returns(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     if unknown:
         raise DataError(f"Returns contain tickers absent from universe.csv: {sorted(unknown)}")
     return ret.sort_index()
+
+
+def load_benchmark_returns(data_dir: Path = DATA_DIR) -> pd.Series:
+    """Monthly total return of SPY converted to CHF (benchmark only, not investable)."""
+    return _read_parquet("benchmarks_chf.parquet", data_dir)[BENCHMARK_TICKER].sort_index().rename("SPY (CHF)")
 
 
 def load_rf(data_dir: Path = DATA_DIR) -> pd.Series:
@@ -76,13 +78,3 @@ def constant_rf(index: pd.DatetimeIndex, annual_rate: float) -> pd.Series:
 
 def load_fx(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return _read_parquet("fx.parquet", data_dir).sort_index()
-
-
-def common_start(returns: pd.DataFrame, tickers: list[str]) -> pd.Timestamp:
-    """First month from which every selected asset has an uninterrupted return history."""
-    gaps = returns[tickers].isna().any(axis=1)
-    if gaps.all():
-        raise DataError("The selected assets never have returns available at the same time.")
-    if not gaps.any():
-        return returns.index[0]
-    return returns.index[returns.index > gaps[gaps].index.max()][0]

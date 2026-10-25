@@ -5,6 +5,8 @@ The Streamlit app never calls the network: it only reads the files written here.
 Sources
 - Prices: yfinance daily adjusted close (dividends reinvested), sampled at month-end.
 - FX: USDCHF=X (CHF per USD) converts every USD-listed asset to CHF; EURCHF=X kept for reporting.
+  USDCHF=X starts in 2003-10 on Yahoo, so CHF returns start in 2003-11.
+- Benchmark: SPY (S&P 500 ETF) converted to CHF, saved separately (not investable).
 - Risk-free: SARON from the SNB data portal (cube "zimoma", free, no key). yfinance has no
   reliable CHF short rate, hence this documented exception to the "yfinance only" rule.
 
@@ -24,12 +26,14 @@ import pandas as pd
 import yfinance as yf
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-START = "1995-01-01"
+START = "2003-01-01"
 FX_TICKERS = ["USDCHF=X", "EURCHF=X"]
+BENCHMARK_TICKERS = ["SPY"]
 CASH_TICKER = "CASH_CHF"
 SNB_URL = "https://data.snb.ch/api/cube/zimoma/data/csv/en"
-MAX_ABS_MONTHLY_RETURN = 0.60  # above this a monthly move is treated as a data error
-MAX_ABS_DAILY_MOVE = 0.25  # warning threshold for a single-day move
+MAX_ABS_MONTHLY_RETURN = 2.00   # single stocks can gain 60-170% in a month; above +200% = bad tick
+WARN_ABS_MONTHLY_RETURN = 1.00  # printed for a manual check
+MAX_ABS_DAILY_MOVE = 1.00       # a single-day move above 100% is printed for a manual check
 
 
 def last_complete_month_end() -> pd.Timestamp:
@@ -70,7 +74,8 @@ def check_daily_jumps(daily: pd.DataFrame) -> None:
 
 def main() -> None:
     universe = pd.read_csv(DATA_DIR / "universe.csv")
-    tickers = universe.loc[universe["ticker"] != CASH_TICKER, "ticker"].tolist()
+    investable = universe.loc[universe["ticker"] != CASH_TICKER, "ticker"].tolist()
+    tickers = investable + BENCHMARK_TICKERS
     end = last_complete_month_end()
 
     print(f"Downloading {len(tickers)} assets + FX from yfinance ...")
@@ -87,7 +92,7 @@ def main() -> None:
     prices_local = monthly[tickers]
     fx = monthly[FX_TICKERS]
 
-    listed = universe.set_index("ticker")["listed_currency"]
+    listed = universe.set_index("ticker")["listed_currency"].reindex(tickers).fillna("USD")
     prices_chf = prices_local.copy()
     usd = [t for t in tickers if listed[t] == "USD"]
     prices_chf[usd] = prices_local[usd].mul(fx["USDCHF=X"], axis=0)
@@ -101,18 +106,22 @@ def main() -> None:
     saron = download_saron().loc[:end]
     # Return of month t is earned at the rate known at the end of month t-1.
     rf = (saron.shift(1) / 1200).rename("rf").reindex(returns_chf.index)
-    returns_chf[CASH_TICKER] = rf
+    returns_chf = pd.concat([returns_chf, rf.rename(CASH_TICKER)], axis=1)
     returns_chf = returns_chf.iloc[1:].dropna(how="all")
 
-    too_big = returns_chf.abs().max()
-    too_big = too_big[too_big > MAX_ABS_MONTHLY_RETURN]
-    if not too_big.empty:
-        sys.exit(f"ERROR: implausible monthly CHF returns:\n{too_big}")
+    big = returns_chf.abs().max()
+    for t, r in big[big > WARN_ABS_MONTHLY_RETURN].items():
+        print(f"NOTE: {t} largest monthly CHF move {r:+.0%} in {returns_chf[t].abs().idxmax():%Y-%m}")
+    if (big > MAX_ABS_MONTHLY_RETURN).any():
+        sys.exit(f"ERROR: implausible monthly CHF returns:\n{big[big > MAX_ABS_MONTHLY_RETURN]}")
+    benchmarks_chf = returns_chf[BENCHMARK_TICKERS]
+    returns_chf = returns_chf[investable + [CASH_TICKER]]
 
     DATA_DIR.mkdir(exist_ok=True)
     prices_local.to_parquet(DATA_DIR / "prices_local.parquet")
     fx.to_parquet(DATA_DIR / "fx.parquet")
     returns_chf.to_parquet(DATA_DIR / "returns_chf.parquet")
+    benchmarks_chf.to_parquet(DATA_DIR / "benchmarks_chf.parquet")
     pd.DataFrame({"saron_pct": saron, "rf_monthly": rf.reindex(saron.index)}).to_parquet(
         DATA_DIR / "rf_chf.parquet")
     meta = {

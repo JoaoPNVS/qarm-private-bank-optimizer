@@ -15,4 +15,5 @@ plotly==7.1.0
 matplotlib==3.10.9
 fpdf2==2.8.9
 yfinance==1.7.0
+lxml==6.1.3  # scripts/build_universe.py (Wikipedia tables)
 pytest==9.1.1
