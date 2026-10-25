@@ -36,12 +36,21 @@ Grading criteria (from the professor) — every feature should serve one of thes
   3-7y, 7-15y); synthetic CASH_CHF earning SARON. A few Nasdaq-100 members are foreign
   companies listed in the US (ASML, ARM, PDD, CCEP, FER, TRI, NBIS...); `isin_country` is the
   ISIN prefix, not the headquarters.
-- **Benchmark series**: SPY converted to CHF (`data/benchmarks_chf.parquet`, not investable).
+- **Benchmarks** (`src/benchmarks.py`): SPY converted to CHF (`data/benchmarks_chf.parquet`, not
+  investable), and one benchmark per profile = SPY (CHF) / Swiss govt bonds 3-7y (CSBGC7.SW)
+  rebalanced monthly: Conservative 30/70, Balanced 60/40, Growth 80/20, Dynamic 100/0 (mixed
+  benchmarks start 2008-02). Ex-ante comparisons estimate SPY jointly with the assets (same
+  Ledoit-Wolf fit, mean shrunk toward the equity grand mean); SPY is never investable.
+- **Volatility caps** calibrated on the benchmarks: historical benchmark volatility 2008-02 to
+  2026-09 rounded up to the next percent -> Conservative 6%, Balanced 10%, Growth 13%,
+  Dynamic 16% (benchmark vols 5.1 / 9.5 / 12.6 / 15.7%). The portfolio thus takes the same
+  risk as the benchmark it is compared with.
 - Prices: yfinance daily adjusted close (dividends reinvested) -> month-end, from 2003.
-  Everything is converted to CHF with USDCHF=X (Yahoo history starts 2003-10, so USD assets
-  have CHF returns from 2003-11). Only complete months are kept.
+  Everything is converted to CHF with USDCHF=X (USD assets have CHF returns from 2003-10).
+  Only complete months are kept.
 - Eligibility: an asset enters the optimisation only once it has a complete 60-month history
-  (recent IPOs/spin-offs such as ARM, CRWV, GEV, SPCX wait; CHF bond ETFs start in 2008-09).
+  (recent IPOs/spin-offs such as ARM, CRWV, GEV, SPCX wait; CHF bond ETFs have returns from
+  2008-02, the 0-3y from 2009-08, so they become eligible in 2013-01 and 2014-07).
 - Data checks in `download_data.py`: abort on a monthly CHF move above +200% (bad tick), print
   moves above 100% for manual review (all reviewed real, e.g. PLTR 2020-11, MRNA 2026-08 on
   40x normal volume). `data_start` in universe.csv can cut corrupted early history.
@@ -89,10 +98,12 @@ app.py                 # Streamlit UI only — no heavy logic
 src/data.py            # loading parquet, CHF conversion, universe tags
 src/estimators.py      # mu and covariance estimators
 src/optimizer.py       # cvxpy problem builder, constraint objects, infeasibility diagnosis
+src/benchmarks.py      # SPY (CHF) and SPY/CHF-bond profile benchmarks, ex-ante comparison
 src/backtest.py        # rolling backtest engine
 src/risk.py            # metrics, VaR/CVaR, risk contributions, stress tests, Monte Carlo
 src/profiling.py       # questionnaire -> profile -> volatility cap + default constraints
 src/report.py          # PDF report (charts drawn with matplotlib — no kaleido)
+scripts/build_universe.py  # constituents snapshot -> data/universe.csv
 scripts/download_data.py
 tests/                 # pytest for optimizer constraints and backtest sanity
 reference/             # friend's app — read-only inspiration, NEVER copy its ERC logic

@@ -35,7 +35,6 @@ class ProblemData:
     universe: pd.DataFrame            # tags indexed by ticker (src.data.load_universe)
     w_prev: pd.Series | None = None   # current holdings; enables turnover cost/constraint
     tc: float = 0.0                   # proportional transaction cost per unit traded
-    benchmark: pd.Series | None = None  # profile benchmark; enables the tracking-error constraint
 
     def __post_init__(self):
         tickers = self.mu.index
@@ -43,8 +42,6 @@ class ProblemData:
         self.cov = self.cov.loc[tickers, tickers]
         if self.w_prev is not None:
             self.w_prev = self.w_prev.reindex(tickers).fillna(0.0)
-        if self.benchmark is not None:
-            self.benchmark = self.benchmark.reindex(tickers).fillna(0.0)
         vals, vecs = np.linalg.eigh(self.cov.values)
         self.sqrt_cov = vecs @ np.diag(np.sqrt(np.clip(vals, 0, None))) @ vecs.T
 
@@ -161,7 +158,6 @@ class OptimizationResult:
     volatility: float = np.nan
     sharpe: float = np.nan
     turnover: float = np.nan
-    tracking_error: float = np.nan
     duals: pd.DataFrame = field(default_factory=pd.DataFrame)
     diagnosis: InfeasibilityDiagnosis | None = None
     message: str = ""
@@ -206,12 +202,8 @@ def portfolio_stats(weights: pd.Series, data: ProblemData) -> dict:
     ret = float(data.mu.values @ w)
     vol = float(np.sqrt(max(w @ data.cov.values @ w, 0.0)))
     turnover = float(np.abs(w - data.w_prev.values).sum()) if data.w_prev is not None else np.nan
-    te = np.nan
-    if data.benchmark is not None:
-        a = w - data.benchmark.values
-        te = float(np.sqrt(max(a @ data.cov.values @ a, 0.0)))
     return {"expected_return": ret, "volatility": vol,
-            "sharpe": ret / vol if vol > TOL else np.nan, "turnover": turnover, "tracking_error": te}
+            "sharpe": ret / vol if vol > TOL else np.nan, "turnover": turnover}
 
 
 def _dual_table(pairs: list[tuple[Constraint, Part]]) -> pd.DataFrame:

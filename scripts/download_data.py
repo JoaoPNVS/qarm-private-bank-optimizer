@@ -5,7 +5,7 @@ The Streamlit app never calls the network: it only reads the files written here.
 Sources
 - Prices: yfinance daily adjusted close (dividends reinvested), sampled at month-end.
 - FX: USDCHF=X (CHF per USD) converts every USD-listed asset to CHF; EURCHF=X kept for reporting.
-  USDCHF=X starts in 2003-10 on Yahoo, so CHF returns start in 2003-11.
+  USD assets have CHF returns from 2003-10 (start of the usable USDCHF=X history on Yahoo).
 - Benchmark: SPY (S&P 500 ETF) converted to CHF, saved separately (not investable).
 - Risk-free: SARON from the SNB data portal (cube "zimoma", free, no key). yfinance has no
   reliable CHF short rate, hence this documented exception to the "yfinance only" rule.

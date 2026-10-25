@@ -14,7 +14,8 @@ Mapping, kept deliberately simple so it can be explained to the client:
 4. knock-out: a horizon below 3 years always gives Conservative.
 
 Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
-return under that cap (src/optimizer.py). Default client constraints are the same for every
+return under that cap (src/optimizer.py), and a CHF benchmark mixing SPY and Swiss government
+bonds (src/benchmarks.py). Default client constraints are the same for every
 profile and kept simple: at most 8% per stock, at most 40% per equity sector, no exclusions, and
 an optional (off by default) minimum share in bonds and cash.
 """
@@ -109,15 +110,22 @@ def assess(answers: dict[str, int]) -> Assessment:
 class ProfileSpec:
     name: str
     description: str
-    max_volatility: float      # risk budget of the profile (annualised, ex ante)
-    min_defensive: float       # suggested bonds + cash floor when the client activates it
+    max_volatility: float      # risk budget (annualised, ex ante), calibrated on the benchmark
+    benchmark_equity: float    # SPY share of the profile benchmark, the rest in CHF govt bonds
+
+    @property
+    def min_defensive(self) -> float:
+        """Suggested bonds + cash floor when the client activates it: the benchmark's bond share."""
+        return round(1 - self.benchmark_equity, 2)
 
 
+# Volatility cap = historical volatility of the profile benchmark rounded up to the next
+# percent (2008-02 to 2026-09: 5.1%, 9.5%, 12.6%, 15.7%), see src/benchmarks.py.
 SPECS = {
-    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.50),
-    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.30),
-    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.14, 0.15),
-    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.18, 0.0),
+    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30),
+    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60),
+    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.13, 0.80),
+    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.16, 1.00),
 }
 MAX_STOCK_WEIGHT = 0.08
 MAX_SECTOR_WEIGHT = 0.40

@@ -38,12 +38,14 @@ class EstimationError(ValueError):
 
 @dataclass
 class Estimates:
-    mu: pd.Series          # annualised expected excess returns
-    cov: pd.DataFrame      # annualised covariance
+    mu: pd.Series          # annualised expected excess returns (investable assets)
+    cov: pd.DataFrame      # annualised covariance (investable assets)
     mean_shrinkage: float  # weight on the class grand mean
     cov_shrinkage: float   # Ledoit-Wolf intensity on correlations
     start: pd.Timestamp
     end: pd.Timestamp
+    benchmark_mu: float = np.nan              # expected excess return of the benchmark series (SPY)
+    joint_cov: pd.DataFrame | None = None     # covariance of investable assets + benchmark series
 
 
 def estimation_window(returns: pd.DataFrame, end: pd.Timestamp, months: int = DEFAULT_WINDOW,
@@ -118,11 +120,27 @@ def shrunk_mean(excess: pd.DataFrame, asset_class: pd.Series,
 
 
 def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
-             mean_shrinkage: float = DEFAULT_MEAN_SHRINKAGE) -> Estimates:
-    """Expected excess returns and covariance from one estimation window of monthly returns."""
+             mean_shrinkage: float = DEFAULT_MEAN_SHRINKAGE,
+             benchmark: pd.Series | None = None) -> Estimates:
+    """Expected excess returns and covariance from one estimation window of monthly returns.
+
+    `benchmark` (e.g. SPY in CHF, not investable) is estimated jointly so the portfolio and its
+    benchmark are compared with the same method: its covariances come from the same Ledoit-Wolf
+    fit and its mean is shrunk toward the equity grand mean (computed on investable stocks only).
+    """
     if returns.isna().any().any():
         raise EstimationError("The estimation window contains missing returns.")
     ex = excess_returns(returns, rf)
     cov, lw_shrinkage = ledoit_wolf_cov(ex)
     mu = shrunk_mean(ex, asset_class, mean_shrinkage)
-    return Estimates(mu, cov, mean_shrinkage, lw_shrinkage, ex.index[0], ex.index[-1])
+    out = Estimates(mu, cov, mean_shrinkage, lw_shrinkage, ex.index[0], ex.index[-1])
+    if benchmark is not None:
+        b = benchmark.reindex(ex.index)
+        if b.isna().any():
+            raise EstimationError("Benchmark returns missing in the estimation window.")
+        name = str(benchmark.name)
+        b_ex = (b - rf.reindex(ex.index)).rename(name)
+        out.joint_cov, _ = ledoit_wolf_cov(pd.concat([ex, b_ex], axis=1))
+        eq_mean = (ex.mean() * MONTHS_PER_YEAR)[asset_class.reindex(ex.columns) == "Equity"].mean()
+        out.benchmark_mu = float((1 - mean_shrinkage) * b_ex.mean() * MONTHS_PER_YEAR + mean_shrinkage * eq_mean)
+    return out

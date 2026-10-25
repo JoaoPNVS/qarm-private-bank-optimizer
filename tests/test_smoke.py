@@ -5,7 +5,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app.py")
-MODULES = ["data", "estimators", "optimizer", "backtest", "risk", "profiling", "report"]
+MODULES = ["data", "estimators", "optimizer", "benchmarks", "backtest", "risk", "profiling", "report"]
 
 
 @pytest.mark.parametrize("name", MODULES)
