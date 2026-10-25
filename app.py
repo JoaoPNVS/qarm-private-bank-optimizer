@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -17,6 +19,20 @@ CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
 BOND_TYPES = ["Short-term", "Treasury 7-10y", "Corporate IG", "High Yield", "TIPS"]
 WINDOW = est.DEFAULT_WINDOW
 EXPECTED_ERRORS = (data.DataError, est.EstimationError, btm.BacktestError, ValueError)
+log = logging.getLogger("app")
+
+
+@contextmanager
+def guarded(section: str):
+    """Last line of defence: an unexpected error shows a clear message (details go to the server
+    log) instead of a Python traceback. Streamlit's st.stop/rerun derive from BaseException and
+    pass through."""
+    try:
+        yield
+    except Exception:
+        log.exception("Unexpected error in %s", section)
+        st.error(f"Something went wrong while building the {section} view. Please change the inputs "
+                 "and try again; the other tabs are not affected.")
 
 
 # --- helpers ---------------------------------------------------------------------------------
@@ -150,7 +166,7 @@ tabs = st.tabs(["Client Profile", "Constraints", "Portfolio", "Backtest", "Simul
 
 # --- Client Profile --------------------------------------------------------------------------
 
-with tabs[0]:
+with tabs[0], guarded("Client Profile"):
     st.subheader("Suitability questionnaire")
     left, right = st.columns([3, 2], gap="large")
     with left:
@@ -194,7 +210,7 @@ cons_spec: dict = {}
 stock_tickers = [t for t in universe.index if universe.at[t, "vehicle"] == "Stock"]
 sectors = sorted(universe.loc[universe["asset_class"] == "Equity", "sector"].unique())
 
-with tabs[1]:
+with tabs[1], guarded("Constraints"):
     st.subheader(f"Client constraints — defaults of the {profile} profile")
     status_box = st.container()
     k = lambda name: f"{profile}.{name}"  # noqa: E731  (each profile keeps its own settings)
@@ -242,6 +258,11 @@ try:
 except EXPECTED_ERRORS as exc:
     st.error(f"The portfolio could not be computed: {exc}")
     st.stop()
+except Exception:
+    log.exception("Unexpected error in the optimisation")
+    st.error("The portfolio could not be computed because of an unexpected error. Please change the inputs "
+             "and try again.")
+    st.stop()
 
 with status_box:
     if res.ok:
@@ -252,7 +273,7 @@ with status_box:
 
 # --- Portfolio -------------------------------------------------------------------------------
 
-with tabs[2]:
+with tabs[2], guarded("Portfolio"):
     st.subheader(f"Recommended portfolio — {profile} profile")
     if require_ok(res):
         w = res.weights
@@ -312,7 +333,7 @@ with tabs[2]:
                 "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
                 {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
 
-with tabs[3]:
+with tabs[3], guarded("Backtest"):
     st.subheader(f"Backtest — {profile} profile with the client constraints")
     c1, c2, _ = st.columns([1, 1, 2])
     freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
@@ -371,5 +392,5 @@ with tabs[3]:
         f.update_layout(title="Allocation by asset class over time (month-end, after drift)", yaxis_title="%",
                         yaxis_range=[0, 100])
         st.plotly_chart(fig_layout(f, 360), width="stretch")
-with tabs[4]:
+with tabs[4], guarded("Simulation"):
     st.info("The wealth simulation will be added in the next step.")

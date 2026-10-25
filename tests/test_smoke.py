@@ -81,3 +81,28 @@ def test_app_defaults_match_the_engine_exactly():
     at = run_app()
     app_final = backtest_metrics(at).loc["Strategy", "Final wealth (USD)"] / 5_000_000
     assert np.isclose(app_final, (1 + engine.returns).prod(), rtol=1e-10)
+
+
+def test_unexpected_error_in_a_tab_shows_a_clear_message(monkeypatch):
+    from src import risk
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated bug")
+
+    monkeypatch.setattr(risk, "performance_metrics", boom)  # only used by the Backtest tab
+    at = run_app()
+    assert not at.exception                                   # no traceback on screen
+    assert any("Something went wrong while building the Backtest view" in e.value for e in at.error)
+    assert any(m.label == "Sharpe ratio" for m in at.metric)  # the Portfolio tab still works
+
+
+def test_unexpected_error_in_the_optimisation(monkeypatch):
+    from src import optimizer
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated bug")
+
+    monkeypatch.setattr(optimizer, "solve", boom)
+    at = run_app({("slider", "Balanced.stock"): 7})          # new inputs, so the cache is bypassed
+    assert not at.exception
+    assert any("unexpected error" in e.value for e in at.error)
