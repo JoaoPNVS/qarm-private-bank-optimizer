@@ -13,12 +13,10 @@ Mapping, kept deliberately simple so it can be explained to the client:
 3. knowledge caps the profile: "none" -> at most Balanced, "basic" -> at most Growth;
 4. knock-out: a horizon below 3 years always gives Conservative.
 
-Each profile has a CHF benchmark built from the universe (strategic allocation with a Swiss
-home bias), and default constraints set around it. Every benchmark satisfies its own default
-constraints (tested), so the defaults are always feasible.
-
 Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
-return under that cap (src/optimizer.py).
+return under that cap (src/optimizer.py). Default client constraints are the same for every
+profile and kept simple: at most 8% per stock, at most 40% per equity sector, no exclusions, and
+an optional (off by default) minimum share in bonds and cash.
 """
 from __future__ import annotations
 
@@ -111,83 +109,28 @@ def assess(answers: dict[str, int]) -> Assessment:
 class ProfileSpec:
     name: str
     description: str
-    benchmark: dict[str, float]
-    asset_bands: dict[str, tuple[float, float]]
-    max_weight: float
-    home_bias: float        # min Swiss share of equities
-    max_non_chf: float
-    max_volatility: float
-    max_tracking_error: float
+    max_volatility: float      # risk budget of the profile (annualised, ex ante)
+    min_defensive: float       # suggested bonds + cash floor when the client activates it
 
-
-# Share of the EQUITY allocation per region, common to all profiles: keeps Europe and Japan in
-# every portfolio and avoids a single foreign market dominating. EM is capped separately (1/3).
-REGION_BANDS = {"Switzerland": (0.0, 0.60), "US": (0.15, 0.50), "Europe": (0.08, 0.30),
-                "Japan": (0.03, 0.15), "Asia-Pacific": (0.0, 0.10)}
-EM_EQUITY_CAP = 1 / 3
 
 SPECS = {
-    "Conservative": ProfileSpec(
-        "Conservative", "Capital preservation first; mostly Swiss franc bonds, 25% equities.",
-        {"CSSMI.SW": .10, "SPY": .075, "EZU": .03, "EWU": .01, "EWJ": .015, "EEM": .02,
-         "CSBGC3.SW": .20, "CSBGC7.SW": .20, "CSBGC0.SW": .15, "LQD": .04, "BWX": .03, "IEF": .03,
-         "GLD": .03, "SRECHA.SW": .04, "CASH_CHF": .03},
-        {"Equity": (0.15, 0.35), "Bond": (0.50, 0.80), "Alternative": (0.0, 0.10),
-         "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.15)},
-        max_weight=0.20, home_bias=0.30, max_non_chf=0.30, max_volatility=0.06, max_tracking_error=0.02),
-    "Balanced": ProfileSpec(
-        "Balanced", "Balance between growth and stability; 50% equities, 40% bonds.",
-        {"CSSMI.SW": .15, "CSSMIM.SW": .05, "SPY": .14, "IWM": .01, "EZU": .05, "EWU": .02, "EWJ": .03,
-         "EPP": .01, "EEM": .04, "CSBGC3.SW": .10, "CSBGC7.SW": .14, "CSBGC0.SW": .10, "LQD": .03,
-         "EMB": .02, "IEF": .01, "GLD": .03, "SRECHA.SW": .04, "CASH_CHF": .03},
-        {"Equity": (0.35, 0.60), "Bond": (0.30, 0.50), "Alternative": (0.0, 0.15),
-         "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.30, max_non_chf=0.40, max_volatility=0.10, max_tracking_error=0.03),
-    "Growth": ProfileSpec(
-        "Growth", "Long-term capital growth; 70% equities, accepts significant fluctuations.",
-        {"CSSMI.SW": .15, "CSSMIM.SW": .07, "SPY": .15, "QQQ": .04, "IWM": .03, "EZU": .08, "EWU": .03,
-         "EWJ": .05, "EPP": .02, "EEM": .06, "AAXJ": .02, "CSBGC7.SW": .08, "CSBGC0.SW": .06, "LQD": .02,
-         "HYG": .02, "EMB": .02, "GLD": .04, "SRECHA.SW": .03, "VNQ": .02, "CASH_CHF": .01},
-        {"Equity": (0.55, 0.80), "Bond": (0.10, 0.35), "Alternative": (0.0, 0.15),
-         "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.25, max_non_chf=0.65, max_volatility=0.14, max_tracking_error=0.04),
-    "Dynamic": ProfileSpec(
-        "Dynamic", "Maximum long-term growth; 90% equities, accepts large drawdowns.",
-        {"CSSMI.SW": .15, "CSSMIM.SW": .10, "SPY": .15, "QQQ": .08, "IWM": .05, "EZU": .10, "EWU": .04,
-         "EWJ": .07, "EPP": .03, "EEM": .09, "AAXJ": .04, "CSBGC7.SW": .03, "HYG": .02, "GLD": .03,
-         "VNQ": .02},
-        {"Equity": (0.75, 1.00), "Bond": (0.0, 0.20), "Alternative": (0.0, 0.15),
-         "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.20, max_non_chf=0.75, max_volatility=0.18, max_tracking_error=0.05),
+    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.50),
+    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.30),
+    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.14, 0.15),
+    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.18, 0.0),
 }
-
-
-def benchmark_weights(profile: str, tickers: list[str]) -> pd.Series:
-    """Profile benchmark over `tickers`, renormalised if some assets are not selected."""
-    w = pd.Series(SPECS[profile].benchmark, dtype=float).reindex(tickers).fillna(0.0)
-    if w.sum() <= 0:
-        raise ValueError(f"No asset of the {profile} benchmark is in the selection.")
-    return (w / w.sum()).rename("benchmark")
+MAX_STOCK_WEIGHT = 0.08
+MAX_SECTOR_WEIGHT = 0.40
 
 
 def default_constraints(profile: str) -> list[opt.Constraint]:
     s = SPECS[profile]
-    return [
-        opt.max_weight(s.max_weight),
-        opt.asset_class_bands(dict(s.asset_bands)),
-        opt.region_bands(dict(REGION_BANDS)),
-        opt.em_equity_cap(EM_EQUITY_CAP),
-        opt.home_bias(s.home_bias),
-        opt.max_non_chf(s.max_non_chf),
-        opt.exclusions([]),
-        opt.max_turnover(1.0),          # only binds when current holdings are given
-        opt.max_volatility(s.max_volatility),
-        opt.max_tracking_error(s.max_tracking_error),
-    ]
+    defensive = opt.min_defensive(s.min_defensive)
+    defensive.active = False
+    return [opt.max_volatility(s.max_volatility), opt.max_stock_weight(MAX_STOCK_WEIGHT),
+            opt.max_sector_weight(MAX_SECTOR_WEIGHT), opt.exclusions(), defensive]
 
 
 def problem_data(profile: str, estimates: Estimates, universe: pd.DataFrame,
                  w_prev: pd.Series | None = None, tc: float = 0.001) -> opt.ProblemData:
-    tickers = list(estimates.mu.index)
-    return opt.ProblemData(estimates.mu, estimates.cov, universe,
-                           w_prev=w_prev, tc=tc, benchmark=benchmark_weights(profile, tickers))
+    return opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=tc)

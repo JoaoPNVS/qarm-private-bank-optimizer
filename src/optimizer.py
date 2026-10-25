@@ -55,10 +55,6 @@ class ProblemData:
     def mask(self, condition: pd.Series) -> np.ndarray:
         return condition.loc[self.mu.index].astype(float).values
 
-    @property
-    def equity(self) -> np.ndarray:
-        return self.mask(self.universe["asset_class"] == "Equity")
-
 
 class Part(NamedTuple):
     label: str
@@ -90,95 +86,7 @@ class Constraint:
 
 
 # --- constraint factories -------------------------------------------------------------------
-
-def max_weight(limit: float = 0.15) -> Constraint:
-    return Constraint(
-        "max_weight", "Maximum weight per asset", {"limit": limit},
-        lambda w, d, p: [Part("Max weight", w <= p["limit"], d.tickers)],
-        lambda p: f"No single investment above {p['limit']:.0%} of the portfolio.")
-
-
-def asset_class_bands(bands: dict[str, tuple[float, float]]) -> Constraint:
-    def build(w, d, p):
-        parts = []
-        for cls, (lo, hi) in p["bands"].items():
-            m = d.mask(d.universe["asset_class"] == cls)
-            if lo > 0:
-                parts.append(Part(f"{cls} >= {lo:.0%}", m @ w >= lo))
-            if hi < 1:
-                parts.append(Part(f"{cls} <= {hi:.0%}", m @ w <= hi))
-        return parts
-
-    return Constraint(
-        "asset_class_bands", "Asset-class bands", {"bands": bands}, build,
-        lambda p: "; ".join(f"{c} between {lo:.0%} and {hi:.0%}" for c, (lo, hi) in p["bands"].items()) + ".")
-
-
-def region_bands(bands: dict[str, tuple[float, float]]) -> Constraint:
-    """Min/max share of the EQUITY allocation per region (linear form: lo*E <= R <= hi*E)."""
-    def build(w, d, p):
-        parts, eq = [], d.equity @ w
-        for region, (lo, hi) in p["bands"].items():
-            m = d.mask((d.universe["asset_class"] == "Equity") & (d.universe["region"] == region))
-            if lo > 0:
-                parts.append(Part(f"{region} >= {lo:.0%} of equities", m @ w >= lo * eq))
-            if hi < 1:
-                parts.append(Part(f"{region} <= {hi:.0%} of equities", m @ w <= hi * eq))
-        return parts
-
-    return Constraint(
-        "region_bands", "Regional equity bands", {"bands": bands}, build,
-        lambda p: "Share of the equity allocation: " + "; ".join(
-            f"{r} {lo:.0%}-{hi:.0%}" for r, (lo, hi) in p["bands"].items()) + ".")
-
-
-def em_equity_cap(ratio: float = 1 / 3) -> Constraint:
-    def build(w, d, p):
-        em = d.mask((d.universe["asset_class"] == "Equity") & d.universe["is_EM"])
-        return [Part(f"EM <= {p['ratio']:.0%} of equities", em @ w <= p["ratio"] * (d.equity @ w))]
-
-    return Constraint(
-        "em_equity_cap", "Emerging-markets cap", {"ratio": ratio}, build,
-        lambda p: f"Emerging-market shares at most {p['ratio']:.0%} of the equity allocation.")
-
-
-def home_bias(min_share: float = 0.30) -> Constraint:
-    def build(w, d, p):
-        ch = d.mask((d.universe["asset_class"] == "Equity") & d.universe["is_swiss"])
-        return [Part(f"Swiss >= {p['min_share']:.0%} of equities", ch @ w >= p["min_share"] * (d.equity @ w))]
-
-    return Constraint(
-        "home_bias", "Swiss home bias", {"min_share": min_share}, build,
-        lambda p: f"At least {p['min_share']:.0%} of the equity allocation in Swiss companies.")
-
-
-def max_non_chf(limit: float = 0.40) -> Constraint:
-    return Constraint(
-        "max_non_chf", "Foreign-currency limit", {"limit": limit},
-        lambda w, d, p: [Part(f"Non-CHF <= {p['limit']:.0%}", d.mask(d.universe["non_chf"]) @ w <= p["limit"])],
-        lambda p: f"At most {p['limit']:.0%} of the portfolio exposed to currencies other than CHF.")
-
-
-def exclusions(tickers: list[str]) -> Constraint:
-    def build(w, d, p):
-        idx = [d.tickers.index(t) for t in p["tickers"] if t in d.tickers]
-        return [Part("Excluded", w[idx] == 0, [d.tickers[i] for i in idx])] if idx else []
-
-    return Constraint(
-        "exclusions", "Exclusions (ESG / client wishes)", {"tickers": list(tickers)}, build,
-        lambda p: "Never invest in: " + (", ".join(p["tickers"]) or "none") + ".")
-
-
-def max_turnover(limit: float = 0.50) -> Constraint:
-    def build(w, d, p):
-        if d.w_prev is None:
-            return []
-        return [Part(f"Turnover <= {p['limit']:.0%}", cp.norm1(w - d.w_prev.values) <= p["limit"])]
-
-    return Constraint(
-        "max_turnover", "Turnover limit", {"limit": limit}, build,
-        lambda p: f"Total trades (buys + sells) at most {p['limit']:.0%} of the portfolio per rebalancing.")
-
+# Kept deliberately simple so each one can be explained to the client in one sentence.
 
 def max_volatility(limit: float = 0.10) -> Constraint:
     """The risk budget of the profile. Mandatory: without it the problem would put everything
@@ -189,16 +97,51 @@ def max_volatility(limit: float = 0.10) -> Constraint:
         lambda p: f"Expected annual volatility at most {p['limit']:.0%}.")
 
 
-def max_tracking_error(limit: float = 0.03) -> Constraint:
+def max_stock_weight(limit: float = 0.08) -> Constraint:
+    """Cap on each single stock (bond funds and cash are diversified and not capped)."""
     def build(w, d, p):
-        if d.benchmark is None:
-            return []
-        return [Part(f"Tracking error <= {p['limit']:.1%}",
-                     cp.norm(d.sqrt_cov @ (w - d.benchmark.values), 2) <= p["limit"])]
+        idx = [i for i, t in enumerate(d.tickers) if d.universe.at[t, "asset_class"] == "Equity"]
+        return [Part("Max stock weight", w[idx] <= p["limit"], [d.tickers[i] for i in idx])] if idx else []
 
     return Constraint(
-        "max_tracking_error", "Maximum tracking error", {"limit": limit}, build,
-        lambda p: f"Expected deviation from the profile benchmark at most {p['limit']:.1%} per year.")
+        "max_stock_weight", "Maximum weight per stock", {"limit": limit}, build,
+        lambda p: f"No single company above {p['limit']:.0%} of the portfolio.")
+
+
+def max_sector_weight(limit: float = 0.40) -> Constraint:
+    def build(w, d, p):
+        eq = d.universe["asset_class"] == "Equity"
+        return [Part(f"{s} <= {p['limit']:.0%}", d.mask(eq & (d.universe["sector"] == s)) @ w <= p["limit"])
+                for s in sorted(d.universe.loc[eq, "sector"].unique())]
+
+    return Constraint(
+        "max_sector_weight", "Maximum weight per sector", {"limit": limit}, build,
+        lambda p: f"No equity sector above {p['limit']:.0%} of the portfolio.")
+
+
+def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = None) -> Constraint:
+    def build(w, d, p):
+        out = d.universe["sector"].isin(p["sectors"]) | d.universe.index.isin(p["tickers"])
+        idx = [i for i, t in enumerate(d.tickers) if out[t]]
+        return [Part("Excluded", w[idx] == 0, [d.tickers[i] for i in idx])] if idx else []
+
+    def describe(p):
+        items = [f"the {s} sector" for s in p["sectors"]] + p["tickers"]
+        return "Never invest in: " + (", ".join(items) or "nothing excluded") + "."
+
+    return Constraint("exclusions", "Exclusions (sectors or companies)",
+                      {"tickers": list(tickers or []), "sectors": list(sectors or [])}, build, describe)
+
+
+def min_defensive(min_share: float = 0.20) -> Constraint:
+    """Minimum share in bonds and cash (optional)."""
+    def build(w, d, p):
+        m = d.mask(d.universe["asset_class"].isin(["Bond", "Cash"]))
+        return [Part(f"Bonds + cash >= {p['min_share']:.0%}", m @ w >= p["min_share"])]
+
+    return Constraint(
+        "min_defensive", "Minimum bonds and cash", {"min_share": min_share}, build,
+        lambda p: f"At least {p['min_share']:.0%} of the portfolio in bonds and cash.")
 
 
 # --- solving --------------------------------------------------------------------------------

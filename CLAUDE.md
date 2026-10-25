@@ -21,15 +21,12 @@ Grading criteria (from the professor) — every feature should serve one of thes
   maps to a volatility cap (risk budget) and to default constraint values.
   Implemented in `src/profiling.py` (7 questions: capacity / willingness / knowledge; profile =
   lower of capacity and willingness, knowledge cap, <3y horizon knock-out; each profile has a volatility cap and a CHF benchmark).
-- Example constraints (all must be editable in the app):
-  - Emerging-market equities ≤ 1/3 of total equity exposure (ratio constraint, linear form)
-  - Swiss equities ≥ X% of equity exposure (home bias)
-  - Max weight per asset (e.g. 15%), min weight if held (optional)
-  - Asset-class bands (equity, bonds, alternatives, cash) depending on profile
-  - Max FX exposure not in CHF (unhedged foreign currency) ≤ Y%
-  - ESG / sector exclusions (toggle assets out)
-  - Turnover cap per rebalance and transaction costs (L1 penalty)
-  - Optional: max portfolio volatility, max tracking error vs benchmark
+- Client constraints (simple, explainable, all editable in the app; `src/optimizer.py`):
+  - Maximum volatility = the profile's risk budget (mandatory)
+  - Max weight per stock (default 8%; bond ETFs and cash are not capped)
+  - Max weight per equity sector (default 40%)
+  - Exclusions of sectors or individual companies
+  - Optional minimum share in bonds + cash (off by default, suggested level per profile)
 
 ## Data (no paid data — everything from yfinance)
 - Investable universe = liquid ETFs + a few Swiss blue chips, chosen so constraints are

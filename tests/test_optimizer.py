@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from src import data, estimators as est, optimizer as opt
-from tests.helpers import TOL, satisfied
+from tests.helpers import satisfied
 
 
 @pytest.fixture(scope="module")
@@ -26,8 +26,12 @@ def vol_cap(limit=0.10):
     return opt.max_volatility(limit)
 
 
+def free_solution(pdata, limit=0.10):
+    return opt.solve(pdata, [vol_cap(limit)]).weights
+
+
 def test_volatility_cap_is_mandatory(pdata):
-    res = opt.solve(pdata, [opt.max_weight(0.15)])
+    res = opt.solve(pdata, [opt.max_stock_weight()])
     assert res.status == "invalid" and "volatility" in res.message
 
 
@@ -44,11 +48,37 @@ def test_higher_cap_gives_higher_expected_return(pdata):
     assert r == sorted(r)
 
 
-def test_constraints_respected(pdata):
-    cons = [vol_cap(0.10), opt.max_weight(0.10), opt.exclusions(["SPY"])]
-    res = opt.solve(pdata, cons)
-    assert res.ok and all(satisfied(c, res.weights, pdata) for c in cons)
-    assert res.duals["active"].any()
+def binding_cases(pdata):
+    """Each constraint at a level that the unconstrained solution violates."""
+    w = free_solution(pdata)
+    uni = pdata.universe
+    eq = uni["asset_class"] == "Equity"
+    top_stock = w[eq].idxmax()
+    top_sector = w[eq].groupby(uni.loc[eq, "sector"]).sum()
+    return [
+        opt.max_stock_weight(w[eq].max() / 2),
+        opt.max_sector_weight(top_sector.max() / 2),
+        opt.exclusions(tickers=[top_stock]),
+        opt.exclusions(sectors=[top_sector.idxmax()]),
+        opt.min_defensive(min(0.9, w[uni["asset_class"].isin(["Bond", "Cash"])].sum() + 0.3)),
+    ]
+
+
+def test_each_constraint_respected_and_binding(pdata):
+    free = free_solution(pdata)
+    for c in binding_cases(pdata):
+        assert not satisfied(c, free, pdata), c.key  # the test constraint really binds
+        res = opt.solve(pdata, [vol_cap(), c])
+        assert res.ok, c.key
+        assert satisfied(c, res.weights, pdata) and satisfied(vol_cap(), res.weights, pdata), c.key
+        assert res.duals["active"].any()
+
+
+def test_exclusions_by_sector_and_ticker(pdata, universe):
+    c = opt.exclusions(tickers=["SPY"], sectors=["Government"])
+    res = opt.solve(pdata, [vol_cap(), c])
+    assert res.weights[["SPY"] + list(universe.index[universe["sector"] == "Government"])].sum() < 1e-6
+    assert "Government sector" in c.description and "SPY" in c.description
 
 
 def test_transaction_costs_reduce_trading(estimates, universe):
@@ -58,15 +88,22 @@ def test_transaction_costs_reduce_trading(estimates, universe):
     assert opt.solve(costly, [vol_cap()]).turnover < opt.solve(free, [vol_cap()]).turnover
 
 
+def test_inactive_constraint_is_ignored(pdata):
+    c = opt.min_defensive(0.9)
+    c.active = False
+    assert np.allclose(opt.solve(pdata, [vol_cap(), c]).weights, free_solution(pdata), atol=1e-6)
+
+
 def test_infeasibility_is_diagnosed(pdata):
-    cons = [vol_cap(0.04), opt.asset_class_bands({"Equity": (0.60, 1.0)})]
+    # no bonds or cash allowed and a 2% volatility cap: impossible with equities only
+    cons = [vol_cap(0.02), opt.exclusions(sectors=["Government", "Cash"])]
     res = opt.solve(pdata, cons)
     assert not res.ok and res.weights is None
-    assert set(res.diagnosis.conflicting) == {"asset_class_bands", "max_volatility"}
+    assert set(res.diagnosis.conflicting) == {"exclusions", "max_volatility"}
     assert "cannot all be satisfied" in res.message
 
 
 def test_single_constraint_infeasible(pdata):
-    res = opt.solve(pdata, [vol_cap(), opt.max_weight(0.02)])  # 35 assets * 2% < 100%
+    res = opt.solve(pdata, [vol_cap(), opt.exclusions(tickers=list(pdata.tickers))])
     assert res.status == "infeasible"
-    assert res.diagnosis.conflicting == ["max_weight"]
+    assert res.diagnosis.conflicting == ["exclusions"]

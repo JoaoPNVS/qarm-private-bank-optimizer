@@ -45,24 +45,13 @@ def test_invalid_answers():
 
 
 @pytest.mark.parametrize("profile", prof.PROFILES)
-def test_benchmark_satisfies_own_defaults(profile, universe, estimates):
-    d = prof.problem_data(profile, estimates, universe)
-    assert np.isclose(sum(prof.SPECS[profile].benchmark.values()), 1)
-    assert set(prof.SPECS[profile].benchmark) <= set(universe.index)
-    for c in prof.default_constraints(profile):
-        assert satisfied(c, d.benchmark, d), c.key
-
-
-@pytest.mark.parametrize("profile", prof.PROFILES)
-def test_optimal_portfolio_feasible_and_diversified(profile, universe, estimates):
+def test_default_portfolio_feasible(profile, universe, estimates):
     d = prof.problem_data(profile, estimates, universe)
     cons = prof.default_constraints(profile)
     res = opt.solve(d, cons)
     assert res.ok, res.message
-    assert all(satisfied(c, res.weights, d) for c in cons)
-    eq = universe["asset_class"] == "Equity"
-    for region in ("Europe", "Japan"):
-        assert res.weights[eq & (universe["region"] == region)].sum() > 0.005
+    assert all(satisfied(c, res.weights, d) for c in cons if c.active)
+    assert not next(c for c in cons if c.key == "min_defensive").active  # optional, off by default
 
 
 def test_risk_and_return_increase_with_profile(universe, estimates):
