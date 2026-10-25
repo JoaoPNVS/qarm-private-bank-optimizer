@@ -1,8 +1,7 @@
 """Build data/universe.csv ONCE (the result is committed; the app never runs this).
 
 Universe = all Nasdaq-100 companies + the largest other S&P 500 companies by market cap, up to
-N_STOCKS US-listed stocks (one share class per company), 3 Swiss government bond ETFs and
-synthetic CHF cash (SARON).
+N_STOCKS US-listed stocks (one share class per company), and synthetic USD cash (3-month T-bill).
 
 Sources (snapshot at build time):
 - constituents: Wikipedia "List of NASDAQ-100 companies" and "List of S&P 500 companies";
@@ -33,10 +32,7 @@ YAHOO_TO_GICS = {"Technology": "Information Technology", "Healthcare": "Health C
                  "Consumer Cyclical": "Consumer Discretionary", "Consumer Defensive": "Consumer Staples",
                  "Financial Services": "Financials", "Basic Materials": "Materials"}
 NON_EQUITY = [
-    ("CSBGC3.SW", "iShares Swiss Domestic Govt Bond 0-3y", "Bond", "Swiss Government Bonds", "CH", "CHF"),
-    ("CSBGC7.SW", "iShares Swiss Domestic Govt Bond 3-7y", "Bond", "Swiss Government Bonds", "CH", "CHF"),
-    ("CSBGC0.SW", "iShares Swiss Domestic Govt Bond 7-15y", "Bond", "Swiss Government Bonds", "CH", "CHF"),
-    ("CASH_CHF", "Cash CHF (SARON)", "Cash", "Cash", "CH", "CHF"),
+    ("CASH_USD", "Cash USD (3-month T-bill)", "Cash", "Cash", "US", "USD"),
 ]
 
 

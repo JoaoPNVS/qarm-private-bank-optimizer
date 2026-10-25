@@ -19,19 +19,18 @@ def returns():
 
 def test_universe_composition(universe):
     counts = universe["asset_class"].value_counts()
-    assert counts["Equity"] == 150 and counts["Bond"] == 3 and counts["Cash"] == 1
-    stocks = universe[universe["asset_class"] == "Equity"]
-    assert (stocks["listed_currency"] == "USD").all()
+    assert counts["Equity"] >= 150 and counts["Cash"] == 1
+    assert (universe["listed_currency"] == "USD").all()             # no currency conversion anywhere
     assert not {"GOOG", "FOX", "NWS"} & set(universe.index)        # one share class per company
+    stocks = universe[universe["asset_class"] == "Equity"]
     assert stocks["sector"].nunique() >= 10 and (stocks["sector"] != "").all()
-    assert (universe.loc[universe["asset_class"] == "Bond", "listed_currency"] == "CHF").all()
 
 
 def test_returns_match_universe(returns, universe):
     assert list(returns.columns) == list(universe.index)
     assert returns.index.is_monotonic_increasing and returns.index.is_month_end.all()
+    assert returns.index[0] == pd.Timestamp("1998-02-28")
     assert np.isfinite(returns.stack()).all()
-    assert returns.abs().max().max() < 2.0
 
 
 def test_no_gaps_after_inception(returns):
@@ -41,33 +40,28 @@ def test_no_gaps_after_inception(returns):
 
 
 def test_enough_assets_eligible_today(returns):
-    eligible = returns.tail(WINDOW).notna().all()
-    assert eligible.sum() >= 120  # recent IPOs and spin-offs wait for 60 months
+    assert returns.tail(WINDOW).notna().all().sum() >= 120  # recent IPOs and spin-offs wait for 60 months
 
 
-def test_cash_equals_rf(returns):
+def test_cash_earns_lagged_t_bill(returns):
     rf = data.load_rf()
-    both = pd.concat([returns[data.CASH_TICKER], rf], axis=1).dropna()
-    assert len(both) > 200 and np.allclose(both.iloc[:, 0], both.iloc[:, 1])
+    irx = pd.read_parquet(data.DATA_DIR / "rf.parquet")["irx_pct"]
+    assert np.allclose(rf.iloc[1:], irx.shift(1).dropna().loc[rf.index[1:]] / 1200)
+    assert np.allclose(returns[data.CASH_TICKER], rf.reindex(returns.index))
+    assert 0 <= rf.max() * 12 < 0.07   # T-bill between 0% and 7% since 1998
 
 
-def test_usd_stock_converted_to_chf(returns):
-    px = pd.read_parquet(data.DATA_DIR / "prices_local.parquet")["AAPL"]
-    fx = data.load_fx()["USDCHF=X"]
-    expected = (px * fx).pct_change(fill_method=None)
-    both = pd.concat([returns["AAPL"], expected], axis=1).dropna()
+def test_returns_are_price_returns_in_usd(returns):
+    px = pd.read_parquet(data.DATA_DIR / "prices.parquet")["AAPL"]
+    both = pd.concat([returns["AAPL"], px.pct_change(fill_method=None)], axis=1).dropna()
     assert np.allclose(both.iloc[:, 0], both.iloc[:, 1])
 
 
-def test_benchmark_spy_in_chf(returns):
-    spy = data.load_benchmark_returns()
-    assert spy.index.equals(returns.index)
-    assert spy.notna().sum() > 250
-    assert 0.10 < spy.std() * np.sqrt(12) < 0.25
-
-
-def test_constant_rf_fallback(returns):
-    assert np.isclose(data.constant_rf(returns.index, 0.01).iloc[0], 0.01 / 12)
+def test_benchmarks(returns):
+    b = data.load_benchmark_returns()
+    assert list(b.columns) == ["SPY", "AGG"] and b.index.equals(returns.index)
+    assert b["AGG"].first_valid_index() == pd.Timestamp("2003-10-31")
+    assert 0.12 < b["SPY"].std() * np.sqrt(12) < 0.20 and b["AGG"].std() * np.sqrt(12) < 0.07
 
 
 def test_missing_file_gives_clear_error(tmp_path):

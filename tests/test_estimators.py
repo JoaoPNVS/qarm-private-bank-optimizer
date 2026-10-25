@@ -38,17 +38,12 @@ def test_shrinkage_toward_class_mean(window, universe):
     raw = est.shrunk_mean(ex, cls, 0.0)
     assert np.allclose(raw.drop(data.CASH_TICKER), ex.drop(columns=data.CASH_TICKER).mean() * 12)
     full = est.shrunk_mean(ex, cls, 1.0)
-    for c in ("Equity", "Bond"):
+    for c in set(cls.reindex(full.index)) - {"Cash"}:
         members = full[cls.reindex(full.index) == c]
         assert np.allclose(members, members.iloc[0])  # every asset gets its class average
     half = est.shrunk_mean(ex, cls, 0.5)
     assert np.allclose(half, (raw + full) / 2)
     assert half[data.CASH_TICKER] == 0
-
-
-def test_shrinkage_keeps_bonds_below_equities(estimates, universe):
-    cls = universe["asset_class"].reindex(estimates.mu.index)
-    assert estimates.mu[cls == "Bond"].mean() < estimates.mu[cls == "Equity"].mean()
 
 
 def test_eligibility_drops_short_histories():

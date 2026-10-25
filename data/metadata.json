@@ -1,14 +1,15 @@
 {
-  "downloaded_at_utc": "2026-10-25T15:12:26+00:00",
+  "downloaded_at_utc": "2026-10-25T15:25:14+00:00",
+  "currency": "USD",
   "last_month_end": "2026-09-30",
-  "first_return": "2003-02-28",
-  "n_assets": 154,
+  "first_return": "1998-02-28",
+  "n_assets": 151,
   "sources": {
     "prices": "yfinance daily auto_adjust -> month-end",
-    "fx": [
-      "USDCHF=X",
-      "EURCHF=X"
+    "benchmarks": [
+      "SPY",
+      "AGG"
     ],
-    "rf": "SNB SARON (https://data.snb.ch/api/cube/zimoma/data/csv/en), lagged 1 month, /1200"
+    "rf": "^IRX (3-month T-bill, % p.a.), lagged 1 month, /1200"
   }
 }

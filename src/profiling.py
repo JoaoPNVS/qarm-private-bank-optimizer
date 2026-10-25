@@ -1,7 +1,7 @@
-"""Suitability questionnaire -> risk profile -> volatility cap, CHF benchmark and default constraints.
+"""Suitability questionnaire -> risk profile -> volatility cap, benchmark and default constraints.
 
-Inspired by the LSFin/FIDLEG suitability test (art. 12 LSFin: the client's financial situation,
-investment objectives, and knowledge & experience). Seven questions, each answer scored 1-4:
+A standard suitability assessment covering the client's financial situation, investment
+objectives, and knowledge & experience. Seven questions, each answer scored 1-4:
 - Risk CAPACITY (can the client bear losses?): horizon, income stability, share of wealth.
 - Risk WILLINGNESS (does the client want to?): objective, tolerable loss, reaction to a drawdown.
 - KNOWLEDGE & experience.
@@ -14,8 +14,8 @@ Mapping, kept deliberately simple so it can be explained to the client:
 4. knock-out: a horizon below 3 years always gives Conservative.
 
 Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
-return under that cap (src/optimizer.py), and a CHF benchmark mixing SPY and Swiss government
-bonds (src/benchmarks.py). Default client constraints are the same for every
+return under that cap (src/optimizer.py), and a benchmark mixing SPY and US aggregate bonds
+(src/benchmarks.py). Default client constraints are the same for every
 profile and kept simple: at most 8% per stock, at most 40% per equity sector, no exclusions, and
 an optional (off by default) minimum share in bonds and cash.
 """
@@ -111,7 +111,7 @@ class ProfileSpec:
     name: str
     description: str
     max_volatility: float      # risk budget (annualised, ex ante), calibrated on the benchmark
-    benchmark_equity: float    # SPY share of the profile benchmark, the rest in CHF govt bonds
+    benchmark_equity: float    # SPY share of the profile benchmark, the rest in AGG
 
     @property
     def min_defensive(self) -> float:
@@ -120,7 +120,7 @@ class ProfileSpec:
 
 
 # Volatility cap = historical volatility of the profile benchmark rounded up to the next
-# percent (2008-02 to 2026-09: 5.1%, 9.5%, 12.6%, 15.7%), see src/benchmarks.py.
+# percent, see src/benchmarks.py.
 SPECS = {
     "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30),
     "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60),

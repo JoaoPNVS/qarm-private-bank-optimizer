@@ -1,8 +1,8 @@
 """Expected-return and covariance estimators.
 
-Conventions: monthly CHF returns in, ANNUALISED EXCESS returns (over the CHF risk-free rate)
-and annualised covariance out. CASH_CHF is the risk-free asset: zero excess return, zero
-variance, zero covariance.
+Conventions: monthly USD returns in, ANNUALISED EXCESS returns (over the 3-month T-bill) and
+annualised covariance out. CASH_USD is the risk-free asset: zero excess return, zero variance,
+zero covariance.
 
 Eligibility: an asset is used at a date only if it has a complete return history over the
 whole estimation window (default 60 months) ending at that date. Recent IPOs therefore enter
@@ -44,7 +44,7 @@ class Estimates:
     cov_shrinkage: float   # Ledoit-Wolf intensity on correlations
     start: pd.Timestamp
     end: pd.Timestamp
-    benchmark_mu: float = np.nan              # expected excess return of the benchmark series (SPY)
+    benchmark_mu: pd.Series | None = None     # expected excess returns of the benchmark series
     joint_cov: pd.DataFrame | None = None     # covariance of investable assets + benchmark series
 
 
@@ -85,7 +85,7 @@ def ledoit_wolf_cov(excess: pd.DataFrame) -> tuple[pd.DataFrame, float]:
     therefore preserved exactly. With more assets than months the sample covariance is
     singular; the shrunk matrix is always well conditioned.
     Why not shrink the raw covariance: its identity target has the AVERAGE variance of the
-    universe on the diagonal, which inflates low-risk assets (a Swiss govt 0-3y ETF would go
+    universe on the diagonal, which inflates low-risk assets (a short-term bond ETF would go
     from ~1.6% to ~5% volatility next to equities).
     """
     risky = _risky(excess.columns)
@@ -121,12 +121,15 @@ def shrunk_mean(excess: pd.DataFrame, asset_class: pd.Series,
 
 def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
              mean_shrinkage: float = DEFAULT_MEAN_SHRINKAGE,
-             benchmark: pd.Series | None = None) -> Estimates:
+             benchmarks: pd.DataFrame | None = None,
+             benchmark_class: dict[str, str] | None = None) -> Estimates:
     """Expected excess returns and covariance from one estimation window of monthly returns.
 
-    `benchmark` (e.g. SPY in CHF, not investable) is estimated jointly so the portfolio and its
-    benchmark are compared with the same method: its covariances come from the same Ledoit-Wolf
-    fit and its mean is shrunk toward the equity grand mean (computed on investable stocks only).
+    `benchmarks` (e.g. SPY and AGG, not investable) are estimated jointly so the portfolio and
+    its benchmark are compared with the same method: their covariances come from the same
+    Ledoit-Wolf fit and each mean is shrunk toward the grand mean of its class
+    (`benchmark_class`, e.g. {"SPY": "Equity", "AGG": "Bond"}) computed on investable assets
+    only; a benchmark whose class has no investable asset keeps its raw mean.
     """
     if returns.isna().any().any():
         raise EstimationError("The estimation window contains missing returns.")
@@ -134,13 +137,14 @@ def estimate(returns: pd.DataFrame, rf: pd.Series, asset_class: pd.Series,
     cov, lw_shrinkage = ledoit_wolf_cov(ex)
     mu = shrunk_mean(ex, asset_class, mean_shrinkage)
     out = Estimates(mu, cov, mean_shrinkage, lw_shrinkage, ex.index[0], ex.index[-1])
-    if benchmark is not None:
-        b = benchmark.reindex(ex.index)
-        if b.isna().any():
+    if benchmarks is not None:
+        b = benchmarks.reindex(ex.index)
+        if b.isna().any().any():
             raise EstimationError("Benchmark returns missing in the estimation window.")
-        name = str(benchmark.name)
-        b_ex = (b - rf.reindex(ex.index)).rename(name)
+        b_ex = b.sub(rf.reindex(ex.index), axis=0)
         out.joint_cov, _ = ledoit_wolf_cov(pd.concat([ex, b_ex], axis=1))
-        eq_mean = (ex.mean() * MONTHS_PER_YEAR)[asset_class.reindex(ex.columns) == "Equity"].mean()
-        out.benchmark_mu = float((1 - mean_shrinkage) * b_ex.mean() * MONTHS_PER_YEAR + mean_shrinkage * eq_mean)
+        class_mean = (ex.mean() * MONTHS_PER_YEAR).groupby(asset_class.reindex(ex.columns)).mean()
+        raw = b_ex.mean() * MONTHS_PER_YEAR
+        target = pd.Series({t: class_mean.get((benchmark_class or {}).get(t), raw[t]) for t in raw.index})
+        out.benchmark_mu = ((1 - mean_shrinkage) * raw + mean_shrinkage * target).rename("mu")
     return out

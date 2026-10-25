@@ -1,23 +1,20 @@
 """Download all market data ONCE and save it to data/*.parquet (committed to the repo).
 
 The Streamlit app never calls the network: it only reads the files written here.
+Everything is in USD; there is no currency conversion.
 
-Sources
-- Prices: yfinance daily adjusted close (dividends reinvested), sampled at month-end.
-- FX: USDCHF=X (CHF per USD) converts every USD-listed asset to CHF; EURCHF=X kept for reporting.
-  USD assets have CHF returns from 2003-10 (start of the usable USDCHF=X history on Yahoo).
-- Benchmark: SPY (S&P 500 ETF) converted to CHF, saved separately (not investable).
-- Risk-free: SARON from the SNB data portal (cube "zimoma", free, no key). yfinance has no
-  reliable CHF short rate, hence this documented exception to the "yfinance only" rule.
+Sources (all yfinance)
+- Prices: daily adjusted close (dividends reinvested), sampled at month-end, from 1998.
+- Risk-free: 3-month T-bill yield ^IRX (% p.a.); monthly rf_t = IRX_{t-1} / 1200, i.e. the
+  rate known at the start of the month. CASH_USD earns rf.
+- Benchmarks (not investable): SPY (S&P 500) and AGG (US aggregate bonds).
 
 Usage:  python scripts/download_data.py
 """
 from __future__ import annotations
 
-import io
 import json
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,14 +23,17 @@ import pandas as pd
 import yfinance as yf
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-START = "2003-01-01"
-FX_TICKERS = ["USDCHF=X", "EURCHF=X"]
-BENCHMARK_TICKERS = ["SPY"]
-CASH_TICKER = "CASH_CHF"
-SNB_URL = "https://data.snb.ch/api/cube/zimoma/data/csv/en"
+START = "1998-01-01"
+BENCHMARK_TICKERS = ["SPY", "AGG"]
+RF_TICKER = "^IRX"
+CASH_TICKER = "CASH_USD"
 MAX_ABS_MONTHLY_RETURN = 2.00   # single stocks can gain 60-170% in a month; above +200% = bad tick
 WARN_ABS_MONTHLY_RETURN = 1.00  # printed for a manual check
 MAX_ABS_DAILY_MOVE = 1.00       # a single-day move above 100% is printed for a manual check
+# Moves above MAX_ABS_MONTHLY_RETURN checked by hand against daily prices and volumes (real).
+REVIEWED_MOVES = {
+    ("REGN", "2000-02"): "biotech bubble: $13 -> $56 over the month on 10-20x normal volume",
+}
 
 
 def last_complete_month_end() -> pd.Timestamp:
@@ -51,19 +51,6 @@ def download_daily(tickers: list[str]) -> pd.DataFrame:
     return raw[tickers]
 
 
-def download_saron() -> pd.Series:
-    """Monthly SARON (% p.a.) from the SNB data portal."""
-    with urllib.request.urlopen(SNB_URL, timeout=60) as resp:
-        text = resp.read().decode("utf-8-sig")
-    df = pd.read_csv(io.StringIO(text), sep=";", skiprows=2)
-    s = df[df["D0"] == "SARON"].dropna(subset=["Value"])
-    out = pd.Series(s["Value"].astype(float).values,
-                    index=pd.to_datetime(s["Date"]) + pd.offsets.MonthEnd(0), name="SARON")
-    if out.empty:
-        sys.exit("ERROR: SARON series not found in SNB cube zimoma")
-    return out.sort_index()
-
-
 def check_daily_jumps(daily: pd.DataFrame) -> None:
     """Warn about daily moves that usually reveal bad ticks (e.g. a misplaced decimal)."""
     jumps = daily.pct_change(fill_method=None).abs()
@@ -78,62 +65,50 @@ def main() -> None:
     tickers = investable + BENCHMARK_TICKERS
     end = last_complete_month_end()
 
-    print(f"Downloading {len(tickers)} assets + FX from yfinance ...")
-    daily = download_daily(tickers + FX_TICKERS)
+    print(f"Downloading {len(tickers)} assets + {RF_TICKER} from yfinance ...")
+    daily = download_daily(tickers + [RF_TICKER])
 
     # Discard known-corrupted early history (universe.csv "data_start").
     for t, start in universe.dropna(subset=["data_start"]).set_index("ticker")["data_start"].items():
         daily.loc[daily.index < pd.Timestamp(start), t] = np.nan
-    check_daily_jumps(daily)
+    check_daily_jumps(daily[tickers])
 
     # last() takes the last valid quote of each month (NaN if the asset did not trade).
     monthly = daily.resample("ME").last().loc[:end]
+    prices = monthly[tickers]
+    irx = monthly[RF_TICKER].rename("irx_pct")
+    if irx.isna().any():
+        sys.exit(f"ERROR: missing {RF_TICKER} months: {irx.index[irx.isna()].strftime('%Y-%m').tolist()}")
 
-    prices_local = monthly[tickers]
-    fx = monthly[FX_TICKERS]
+    returns = prices.pct_change(fill_method=None)
+    rf = (irx.shift(1) / 1200).rename("rf_monthly")
+    returns = pd.concat([returns, rf.rename(CASH_TICKER)], axis=1).iloc[1:].dropna(how="all")
 
-    listed = universe.set_index("ticker")["listed_currency"].reindex(tickers).fillna("USD")
-    prices_chf = prices_local.copy()
-    usd = [t for t in tickers if listed[t] == "USD"]
-    prices_chf[usd] = prices_local[usd].mul(fx["USDCHF=X"], axis=0)
-    unknown = set(listed[tickers]) - {"CHF", "USD"}
-    if unknown:
-        sys.exit(f"ERROR: no FX conversion implemented for listed currencies {unknown}")
-
-    returns_chf = prices_chf.pct_change(fill_method=None)
-
-    print("Downloading SARON from the SNB data portal ...")
-    saron = download_saron().loc[:end]
-    # Return of month t is earned at the rate known at the end of month t-1.
-    rf = (saron.shift(1) / 1200).rename("rf").reindex(returns_chf.index)
-    returns_chf = pd.concat([returns_chf, rf.rename(CASH_TICKER)], axis=1)
-    returns_chf = returns_chf.iloc[1:].dropna(how="all")
-
-    big = returns_chf.abs().max()
+    big = returns.abs().max()
     for t, r in big[big > WARN_ABS_MONTHLY_RETURN].items():
-        print(f"NOTE: {t} largest monthly CHF move {r:+.0%} in {returns_chf[t].abs().idxmax():%Y-%m}")
-    if (big > MAX_ABS_MONTHLY_RETURN).any():
-        sys.exit(f"ERROR: implausible monthly CHF returns:\n{big[big > MAX_ABS_MONTHLY_RETURN]}")
-    benchmarks_chf = returns_chf[BENCHMARK_TICKERS]
-    returns_chf = returns_chf[investable + [CASH_TICKER]]
+        print(f"NOTE: {t} largest monthly move {r:+.0%} in {returns[t].abs().idxmax():%Y-%m}")
+    extreme = returns.abs().stack()
+    extreme = [(t, d.strftime("%Y-%m")) for (d, t), r in extreme[extreme > MAX_ABS_MONTHLY_RETURN].items()]
+    unreviewed = [m for m in extreme if m not in REVIEWED_MOVES]
+    if unreviewed:
+        sys.exit(f"ERROR: implausible monthly returns (review them, then add to REVIEWED_MOVES): {unreviewed}")
 
     DATA_DIR.mkdir(exist_ok=True)
-    prices_local.to_parquet(DATA_DIR / "prices_local.parquet")
-    fx.to_parquet(DATA_DIR / "fx.parquet")
-    returns_chf.to_parquet(DATA_DIR / "returns_chf.parquet")
-    benchmarks_chf.to_parquet(DATA_DIR / "benchmarks_chf.parquet")
-    pd.DataFrame({"saron_pct": saron, "rf_monthly": rf.reindex(saron.index)}).to_parquet(
-        DATA_DIR / "rf_chf.parquet")
+    prices.to_parquet(DATA_DIR / "prices.parquet")
+    returns[investable + [CASH_TICKER]].to_parquet(DATA_DIR / "returns.parquet")
+    returns[BENCHMARK_TICKERS].to_parquet(DATA_DIR / "benchmarks.parquet")
+    pd.concat([irx, rf], axis=1).iloc[1:].to_parquet(DATA_DIR / "rf.parquet")
     meta = {
         "downloaded_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "currency": "USD",
         "last_month_end": str(end.date()),
-        "first_return": str(returns_chf.index[0].date()),
-        "n_assets": int(returns_chf.shape[1]),
-        "sources": {"prices": "yfinance daily auto_adjust -> month-end",
-                    "fx": FX_TICKERS, "rf": f"SNB SARON ({SNB_URL}), lagged 1 month, /1200"},
+        "first_return": str(returns.index[0].date()),
+        "n_assets": len(investable) + 1,
+        "sources": {"prices": "yfinance daily auto_adjust -> month-end", "benchmarks": BENCHMARK_TICKERS,
+                    "rf": f"{RF_TICKER} (3-month T-bill, % p.a.), lagged 1 month, /1200"},
     }
     (DATA_DIR / "metadata.json").write_text(json.dumps(meta, indent=2))
-    print(f"Saved returns {returns_chf.shape} from {meta['first_return']} to {meta['last_month_end']}")
+    print(f"Saved returns {returns.shape} from {meta['first_return']} to {meta['last_month_end']}")
 
 
 if __name__ == "__main__":

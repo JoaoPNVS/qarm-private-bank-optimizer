@@ -75,15 +75,15 @@ def test_each_constraint_respected_and_binding(pdata):
 
 
 def test_exclusions_by_sector_and_ticker(pdata, universe):
-    c = opt.exclusions(tickers=["AAPL"], sectors=["Swiss Government Bonds"])
+    c = opt.exclusions(tickers=["AAPL"], sectors=["Energy"])
     res = opt.solve(pdata, [vol_cap(), c])
-    out = ["AAPL"] + [t for t in universe.index[universe["sector"] == "Swiss Government Bonds"] if t in res.weights]
+    out = ["AAPL"] + [t for t in universe.index[universe["sector"] == "Energy"] if t in res.weights]
     assert res.weights[out].sum() < 1e-6
-    assert "Swiss Government Bonds sector" in c.description and "AAPL" in c.description
+    assert "Energy sector" in c.description and "AAPL" in c.description
 
 
 def test_transaction_costs_reduce_trading(estimates, universe):
-    w_prev = pd.Series({"AAPL": 0.5, "CSBGC7.SW": 0.5})
+    w_prev = pd.Series({"AAPL": 0.5, data.CASH_TICKER: 0.5})
     free = opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=0.0)
     costly = opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=0.05)
     assert opt.solve(costly, [vol_cap()]).turnover < opt.solve(free, [vol_cap()]).turnover
@@ -96,8 +96,8 @@ def test_inactive_constraint_is_ignored(pdata):
 
 
 def test_infeasibility_is_diagnosed(pdata):
-    # no bonds or cash allowed and a 2% volatility cap: impossible with equities only
-    cons = [vol_cap(0.02), opt.exclusions(sectors=["Swiss Government Bonds", "Cash"])]
+    # no cash allowed and a 2% volatility cap: impossible with equities only
+    cons = [vol_cap(0.02), opt.exclusions(sectors=["Cash"])]
     res = opt.solve(pdata, cons)
     assert not res.ok and res.weights is None
     assert set(res.diagnosis.conflicting) == {"exclusions", "max_volatility"}
