@@ -200,3 +200,15 @@ def test_changes_propagate_no_stale_cache():
     at.number_input(key="bt.tc").set_value(50)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
+
+
+def test_bond_portfolio_section():
+    at = run_app({("selectbox", "profile"): "Conservative"})
+    labels = {m.label: m.value for m in at.metric}
+    assert labels["Bonds in the portfolio"].startswith("7")             # 70% floor
+    years = float(labels["Average duration"].split()[0])
+    assert 0 < years <= 5.0                                               # Conservative duration limit
+    assert any("Share of bonds" in df.value.columns for df in at.dataframe)
+    at = run_app({("selectbox", "profile"): "Dynamic"})
+    # no bond floor and negative expected bond returns: Dynamic holds no bonds today
+    assert any("No bonds in this portfolio" in i.value for i in at.info)

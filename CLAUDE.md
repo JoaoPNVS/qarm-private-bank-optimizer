@@ -132,9 +132,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
 1. **Client Profile** — questionnaire and resulting profile, with the reasons.
 2. **Constraints** — each constraint with its toggle/slider, preset to the profile defaults;
    clear message naming the conflicting constraints when infeasible.
-3. **Portfolio** — weights vs benchmark, split equities / bonds / cash, by sector, bonds by
-   type (short-term, Treasury, corporate IG, high yield, TIPS), expected return, volatility,
-   Sharpe vs benchmark.
+3. **Portfolio** — ex-ante return / volatility / Sharpe vs benchmark and SPY, allocation by asset
+   class and equity sector, holdings; **Bond portfolio** section: share of bonds, average
+   duration and rating, investment-grade and high-yield shares, breakdown by issuer type,
+   maturity bucket and credit quality, table of bond funds (`src/bonds.py`).
 4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
    ex-ante vs realised volatility.
 5. **Simulation** — wealth fan chart and percentiles vs benchmark.
@@ -146,6 +147,7 @@ src/data.py                # loading parquet, universe tags
 src/estimators.py          # shrunk means and Ledoit-Wolf covariance, eligibility window
 src/optimizer.py           # cvxpy problem builder, constraint objects, infeasibility diagnosis
 src/benchmarks.py          # SPY and SPY/bond profile benchmarks, ex-ante comparison
+src/bonds.py               # bond sleeve analytics (segments, duration, rating), rating scale
 src/backtest.py            # rolling backtest engine
 src/risk.py                # performance metrics, Monte Carlo block bootstrap
 src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, default constraints

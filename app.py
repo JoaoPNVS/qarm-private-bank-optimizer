@@ -10,14 +10,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import backtest as btm, benchmarks as bm, data, estimators as est, optimizer as opt, profiling as prof, risk
+from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, optimizer as opt, profiling as prof, risk
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide")
 
 NAVY, GREY, ACCENT = "#1f3b57", "#a3adb8", "#c0392b"
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
-BOND_TYPES = ["Treasury", "Corporate IG", "High Yield", "Municipal", "Mortgage-backed", "EM USD",
-              "International hedged", "TIPS", "Floating rate"]
 WINDOW = est.DEFAULT_WINDOW
 EXPECTED_ERRORS = (data.DataError, est.EstimationError, btm.BacktestError, ValueError)
 log = logging.getLogger("app")
@@ -310,20 +308,40 @@ with tabs[2], guarded("Portfolio"):
         by_class = pd.DataFrame({"Portfolio": w.groupby(uni["asset_class"]).sum(),
                                  "Benchmark": pd.Series({"Equity": b_eq, "Bond": 1 - b_eq})}).reindex(CLASS_ORDER).fillna(0)
         is_bond = uni["asset_class"] == "Bond"
-        by_type = w[is_bond].groupby(uni.loc[is_bond, "bond_type"]).sum().reindex(BOND_TYPES).fillna(0)
         is_eq = uni["asset_class"] == "Equity"
         by_sector = w[is_eq].groupby(uni.loc[is_eq, "sector"]).sum().sort_values(ascending=False)
-        b1, b2, b3 = st.columns(3)
+        b1, b3 = st.columns(2)
         b1.plotly_chart(fig_layout(grouped_bars(by_class, "By asset class"), 340), width="stretch")
-        f = go.Figure(go.Bar(x=by_type.index, y=by_type * 100, marker_color=NAVY))
-        f.update_layout(title=f"Bonds by type ({by_type.sum():.0%} of the portfolio)", yaxis_title="% of portfolio")
-        b2.plotly_chart(fig_layout(f, 340), width="stretch")
         f = go.Figure(go.Bar(x=by_sector.index, y=by_sector * 100, marker_color=NAVY))
         f.update_layout(title=f"Equities by sector ({by_sector.sum():.0%} of the portfolio)", yaxis_title="% of portfolio")
         b3.plotly_chart(fig_layout(f, 340), width="stretch")
         em = w[is_eq & uni["is_EM"]].sum()
         st.markdown(f"**Emerging markets:** {pct(em)} of the portfolio, {pct(em / max(w[is_eq].sum(), 1e-12))} of equities. "
                     f"**Cash:** {pct(w[uni['asset_class'] == 'Cash'].sum())}. **Positions above 0.5%:** {(w > 0.005).sum()}.")
+
+        st.markdown("### Bond portfolio")
+        bs = bonds.sleeve_summary(w, universe)
+        if bs["share"] <= 0:
+            st.info("No bonds in this portfolio.")
+        else:
+            c = st.columns(5)
+            c[0].metric("Bonds in the portfolio", pct(bs["share"]))
+            c[1].metric("Average duration", f"{bs['duration']:.1f} years")
+            c[2].metric("Average rating", bs["avg_rating"])
+            c[3].metric("Investment grade", pct(bs["ig_share"]), help="Share of the bond portfolio")
+            c[4].metric("High yield incl. EM", pct(bs["hy_share_of_portfolio"]), help="Share of the whole portfolio")
+            g1, g2, g3 = st.columns(3)
+            for col, key, title in ((g1, "by_issuer", "By issuer type"), (g2, "by_maturity", "By maturity"),
+                                    (g3, "by_quality", "By credit quality")):
+                s_ = bs[key]
+                f = go.Figure(go.Bar(x=s_.index, y=s_ * 100, marker_color=NAVY))
+                f.update_layout(title=title, yaxis_title="% of bonds")
+                col.plotly_chart(fig_layout(f, 300), width="stretch")
+            st.dataframe(bs["funds"].style.format({"Duration": "{:.1f}", "Weight": "{:.1%}", "Share of bonds": "{:.1%}"}),
+                         width="stretch")
+            st.caption("Duration and ratings are the funds' current fact-sheet values (iShares, State Street, "
+                       "Vanguard, Sept./Oct. 2026), applied to the whole history. Maturity buckets use the average "
+                       "maturity: <1y ultra-short, 1-5y short, 5-10y intermediate, 10y+ long.")
 
         held = w[w > 0.005].sort_values()
         f = go.Figure(go.Bar(y=[label(t) for t in held.index], x=held * 100, orientation="h",

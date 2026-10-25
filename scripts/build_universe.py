@@ -34,6 +34,9 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.bonds import NOTCH_RATING, RATING_NOTCH  # noqa: E402  (one rating scale for the project)
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 N_STOCKS = 150
 NDX_URL = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
@@ -96,13 +99,6 @@ BOND_CHARACTERISTICS = {
     "FLOT": ("Corporate", 0.02, 1.85, {"AAA": 22.07, "AA": 26.01, "A": 45.19, "BBB": 6.04}, ISH + "239534", "2026-10-22"),
 }
 HIGH_YIELD = {"HYG", "EMB"}  # EMB counts as high yield for the client's constraint (average BB+)
-# Notch scale used to average ratings; a letter bucket without +/- sits on its middle notch.
-RATING_NOTCH = {"AAA": 1, "AA+": 2, "AA": 3, "AA-": 4, "A+": 5, "A": 6, "A-": 7, "BBB+": 8, "BBB": 9, "BBB-": 10,
-                "BB+": 11, "BB": 12, "BB-": 13, "B+": 14, "B": 15, "B-": 16, "CCC+": 17, "CCC": 18, "CCC-": 19,
-                "CC": 20, "C": 21, "D": 22}
-NOTCH_RATING = {v: k for k, v in RATING_NOTCH.items()}
-
-
 def maturity_bucket(wam: float) -> str:
     return "Ultra-short" if wam < 1 else "Short" if wam < 5 else "Intermediate" if wam < 10 else "Long"
 
