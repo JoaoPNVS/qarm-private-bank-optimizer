@@ -37,6 +37,7 @@ class ProblemData:
     risk_aversion: float
     w_prev: pd.Series | None = None   # current holdings; enables turnover cost/constraint
     tc: float = 0.0                   # proportional transaction cost per unit traded
+    benchmark: pd.Series | None = None  # profile benchmark; enables the tracking-error constraint
 
     def __post_init__(self):
         tickers = self.mu.index
@@ -44,6 +45,8 @@ class ProblemData:
         self.cov = self.cov.loc[tickers, tickers]
         if self.w_prev is not None:
             self.w_prev = self.w_prev.reindex(tickers).fillna(0.0)
+        if self.benchmark is not None:
+            self.benchmark = self.benchmark.reindex(tickers).fillna(0.0)
         vals, vecs = np.linalg.eigh(self.cov.values)
         self.sqrt_cov = vecs @ np.diag(np.sqrt(np.clip(vals, 0, None))) @ vecs.T
 
@@ -113,6 +116,24 @@ def asset_class_bands(bands: dict[str, tuple[float, float]]) -> Constraint:
         lambda p: "; ".join(f"{c} between {lo:.0%} and {hi:.0%}" for c, (lo, hi) in p["bands"].items()) + ".")
 
 
+def region_bands(bands: dict[str, tuple[float, float]]) -> Constraint:
+    """Min/max share of the EQUITY allocation per region (linear form: lo*E <= R <= hi*E)."""
+    def build(w, d, p):
+        parts, eq = [], d.equity @ w
+        for region, (lo, hi) in p["bands"].items():
+            m = d.mask((d.universe["asset_class"] == "Equity") & (d.universe["region"] == region))
+            if lo > 0:
+                parts.append(Part(f"{region} >= {lo:.0%} of equities", m @ w >= lo * eq))
+            if hi < 1:
+                parts.append(Part(f"{region} <= {hi:.0%} of equities", m @ w <= hi * eq))
+        return parts
+
+    return Constraint(
+        "region_bands", "Regional equity bands", {"bands": bands}, build,
+        lambda p: "Share of the equity allocation: " + "; ".join(
+            f"{r} {lo:.0%}-{hi:.0%}" for r, (lo, hi) in p["bands"].items()) + ".")
+
+
 def em_equity_cap(ratio: float = 1 / 3) -> Constraint:
     def build(w, d, p):
         em = d.mask((d.universe["asset_class"] == "Equity") & d.universe["is_EM"])
@@ -166,6 +187,18 @@ def max_volatility(limit: float = 0.10) -> Constraint:
         "max_volatility", "Maximum volatility", {"limit": limit},
         lambda w, d, p: [Part(f"Volatility <= {p['limit']:.0%}", cp.norm(d.sqrt_cov @ w, 2) <= p["limit"])],
         lambda p: f"Expected annual volatility at most {p['limit']:.0%}.")
+
+
+def max_tracking_error(limit: float = 0.03) -> Constraint:
+    def build(w, d, p):
+        if d.benchmark is None:
+            return []
+        return [Part(f"Tracking error <= {p['limit']:.1%}",
+                     cp.norm(d.sqrt_cov @ (w - d.benchmark.values), 2) <= p["limit"])]
+
+    return Constraint(
+        "max_tracking_error", "Maximum tracking error", {"limit": limit}, build,
+        lambda p: f"Expected deviation from the profile benchmark at most {p['limit']:.1%} per year.")
 
 
 # --- solving --------------------------------------------------------------------------------
@@ -295,10 +328,12 @@ def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = Tru
     return OptimizationResult(status, message=f"The solver failed (status: {status}). Try relaxing constraints.")
 
 
-def cost_of_constraints(data: ProblemData, constraints: list[Constraint]) -> pd.DataFrame:
+def cost_of_constraints(data: ProblemData, constraints: list[Constraint],
+                        wealth: float | None = None) -> pd.DataFrame:
     """Re-solve without each active constraint, one at a time. Costs are what the client gives
     up by imposing it: utility cost >= 0 by construction; the Sharpe cost can be negative because
-    the optimiser maximises utility, not Sharpe."""
+    the optimiser maximises utility, not Sharpe. With `wealth` (CHF), the utility cost is also
+    given in CHF per year (certainty-equivalent return given up x wealth)."""
     base = solve(data, constraints)
     if not base.ok:
         raise OptimizationError(base.message)
@@ -310,7 +345,10 @@ def cost_of_constraints(data: ProblemData, constraints: list[Constraint]) -> pd.
                      "sharpe_cost": res.sharpe - base.sharpe,
                      "utility_cost_bps": (res.utility - base.utility) * 1e4,
                      "return_without": res.expected_return, "vol_without": res.volatility})
-    return pd.DataFrame(rows).sort_values("utility_cost_bps", ascending=False, ignore_index=True)
+    out = pd.DataFrame(rows).sort_values("utility_cost_bps", ascending=False, ignore_index=True)
+    if wealth is not None:
+        out["utility_cost_chf"] = out["utility_cost_bps"] / 1e4 * wealth
+    return out
 
 
 @dataclass

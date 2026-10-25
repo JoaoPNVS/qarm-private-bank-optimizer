@@ -58,6 +58,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
   50/40/10 reference portfolio `REFERENCE_WEIGHTS` in `src/estimators.py` and delta set by a 0.35
   reference Sharpe. Option: sample mean shrunk toward the grand mean. Raw means concentrate the
   optimiser on past winners (see the module docstring).
+- House views (Black-Litterman on the equilibrium prior): absolute or relative views on tickers or
+  tag-based baskets (reference-weighted), each with a confidence c; Omega_k = (1/c - 1)·tau·p'Σp
+  (c = 50% = He-Litterman), tau = 0.05 (cancels out of the posterior mean). Default demo set
+  `HOUSE_VIEWS` (4 views), switchable off. No active view => exactly the equilibrium returns.
+- Extra constraints: regional bands on the share of EQUITIES per region (so no profile drops
+  Europe or Japan), optional max tracking error vs the profile benchmark. Constraint costs are
+  shown in bps and in CHF per year on the client's wealth.
 - Optimizer: cvxpy, long-only, fully invested:
   max  wᵀμ − (λ/2) wᵀΣw − c·‖w − w_prev‖₁   subject to all active client constraints.
   Solver: CLARABEL with fallback to SCS/ECOS. If infeasible, the app tells the user WHICH

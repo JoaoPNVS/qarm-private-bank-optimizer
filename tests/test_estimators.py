@@ -51,6 +51,55 @@ def test_shrunk_mean_limits(window):
     assert np.allclose(full, full.iloc[0])
 
 
+@pytest.fixture(scope="module")
+def universe():
+    return data.load_universe()
+
+
+def test_no_views_gives_equilibrium_exactly(window, estimates, universe):
+    for views in (None, [], [est.View("off", {"ticker": "GLD"}, 0.05, active=False)]):
+        e = est.estimate(*window, views=views, universe=universe)
+        assert e.mu.equals(estimates.mu)
+
+
+def test_full_confidence_view_holds_exactly(window, universe):
+    v = est.View("CH - US = 2%", {"asset_class": "Equity", "region": "Switzerland"}, 0.02, 1.0,
+                 short={"asset_class": "Equity", "region": "US"})
+    e = est.estimate(*window, views=[v], universe=universe)
+    assert np.isclose(e.views.loc[v.name, "posterior"], 0.02)
+
+
+def test_views_move_posterior_toward_q(window, universe):
+    e = est.estimate(*window, views=est.HOUSE_VIEWS, universe=universe)
+    t = e.views
+    assert len(t) == len(est.HOUSE_VIEWS)
+    # posterior lies between prior and the view for each (non-conflicting) house view
+    lo, hi = np.minimum(t["prior"], t["view"]), np.maximum(t["prior"], t["view"])
+    assert ((t["posterior"] >= lo - 1e-9) & (t["posterior"] <= hi + 1e-9)).all()
+    assert e.mu[data.CASH_TICKER] == 0
+
+
+def test_lower_confidence_moves_less(window, universe):
+    def post(c):
+        v = est.View("gold", {"ticker": "GLD"}, 0.08, c)
+        return est.estimate(*window, views=[v], universe=universe).mu["GLD"]
+    assert est.estimate(*window).mu["GLD"] < post(0.2) < post(0.8) < 0.08 + 1e-12
+
+
+def test_view_basket_weights(universe):
+    w_ref = est.reference_weights(list(universe.index))
+    b = est.basket({"asset_class": "Equity", "region": "Switzerland"}, universe, w_ref)
+    assert np.isclose(b.sum(), 1) and np.isclose(b["CSSMI.SW"], 0.8)  # 8% / (8% + 2%)
+    assert np.isclose(est.basket({"ticker": "NESN.SW"}, universe, w_ref)["NESN.SW"], 1)  # no ref weight
+    with pytest.raises(est.EstimationError):
+        est.basket({"region": "Mars"}, universe, w_ref)
+
+
+def test_views_rejected_with_shrunk_mean(window, universe):
+    with pytest.raises(est.EstimationError, match="equilibrium"):
+        est.estimate(*window, method="shrunk_mean", views=est.HOUSE_VIEWS, universe=universe)
+
+
 def test_window_errors():
     ret = data.load_returns()
     with pytest.raises(est.EstimationError, match="Incomplete"):

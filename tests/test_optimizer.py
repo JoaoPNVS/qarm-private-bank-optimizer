@@ -3,8 +3,7 @@ import pandas as pd
 import pytest
 
 from src import data, estimators as est, optimizer as opt
-
-TOL = 1e-5
+from tests.helpers import TOL, satisfied
 
 
 @pytest.fixture(scope="module")
@@ -31,33 +30,6 @@ def balanced_constraints():
         opt.em_equity_cap(1 / 3), opt.home_bias(0.30), opt.max_non_chf(0.40),
         opt.exclusions(["DBC"]), opt.max_volatility(0.09),
     ]
-
-
-def share(w, uni, cond):
-    return float(w[cond.loc[w.index]].sum())
-
-
-def satisfied(c, w, d):
-    """Independent numerical check of each constraint on a solution."""
-    uni, p = d.universe, c.params
-    eq = share(w, uni, uni["asset_class"] == "Equity")
-    if c.key == "max_weight":
-        return w.max() <= p["limit"] + TOL
-    if c.key == "asset_class_bands":
-        return all(lo - TOL <= share(w, uni, uni["asset_class"] == k) <= hi + TOL for k, (lo, hi) in p["bands"].items())
-    if c.key == "em_equity_cap":
-        return share(w, uni, (uni["asset_class"] == "Equity") & uni["is_EM"]) <= p["ratio"] * eq + TOL
-    if c.key == "home_bias":
-        return share(w, uni, (uni["asset_class"] == "Equity") & uni["is_swiss"]) >= p["min_share"] * eq - TOL
-    if c.key == "max_non_chf":
-        return share(w, uni, uni["non_chf"]) <= p["limit"] + TOL
-    if c.key == "exclusions":
-        return w[p["tickers"]].abs().max() <= TOL
-    if c.key == "max_turnover":
-        return (w - d.w_prev).abs().sum() <= p["limit"] + TOL
-    if c.key == "max_volatility":
-        return np.sqrt(w @ d.cov @ w) <= p["limit"] + TOL
-    raise KeyError(c.key)
 
 
 def test_unconstrained_equilibrium_recovers_reference(pdata, estimates):
@@ -88,6 +60,7 @@ TIGHT = [
     opt.max_non_chf(0.20),
     opt.exclusions(["SPY", "CSSMI.SW"]),
     opt.max_volatility(0.04),
+    opt.region_bands({"Europe": (0.20, 0.40), "Japan": (0.10, 0.20), "US": (0.0, 0.30)}),
 ]
 
 
@@ -108,6 +81,24 @@ def test_turnover_constraint(estimates, universe):
     res = opt.solve(d, [c])
     assert res.ok and satisfied(c, res.weights, d)
     assert np.isclose(res.turnover, 0.5, atol=1e-4)
+
+
+def test_tracking_error_constraint(estimates, universe):
+    bench = pd.Series({"CSSMI.SW": 0.5, "CSBGC7.SW": 0.5})
+    d = opt.ProblemData(estimates.mu, estimates.cov, universe, estimates.delta, benchmark=bench)
+    c = opt.max_tracking_error(0.02)
+    free, res = opt.solve(d, []), opt.solve(d, [c])
+    assert res.ok and satisfied(c, res.weights, d) and not satisfied(c, free.weights, d)
+
+
+def test_tracking_error_ignored_without_benchmark(pdata):
+    assert np.allclose(opt.solve(pdata, [opt.max_tracking_error(0.001)]).weights,
+                       opt.solve(pdata, []).weights, atol=1e-6)
+
+
+def test_cost_in_chf(pdata):
+    cost = opt.cost_of_constraints(pdata, balanced_constraints(), wealth=5e6)
+    assert np.allclose(cost["utility_cost_chf"], cost["utility_cost_bps"] * 500)
 
 
 def test_all_balanced_constraints_respected(pdata):

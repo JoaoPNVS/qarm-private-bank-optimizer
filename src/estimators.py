@@ -12,10 +12,21 @@ the default 60-month window the winners change (UBS, ABB, gold take ~97%). Equil
 construction, the returns that make the reference portfolio optimal, so the optimiser starts
 from a diversified allocation and only deviates from it because of the client's constraints.
 The shrunk historical mean (toward the cross-sectional grand mean) is kept as an option.
+
+House views (Black-Litterman): the CIO's views are blended with the equilibrium prior,
+    mu_BL = Pi + tau Sigma P' (tau P Sigma P' + Omega)^-1 (Q - P Pi),
+with one row of P per view (absolute: a basket; relative: long basket minus short basket).
+Baskets select assets by ticker or by tags (region, asset class, ...) and are weighted by the
+reference portfolio inside the basket (equal weights if the basket holds none of it).
+View uncertainty is set from the confidence c in (0, 1]:
+    Omega_k = (1/c_k - 1) * tau * p_k' Sigma p_k
+so c = 50% gives the classic He-Litterman choice Omega = tau P Sigma P', c = 100% imposes the
+view exactly and c -> 0 ignores it. With Omega proportional to tau, tau cancels out of mu_BL;
+it is kept (TAU = 0.05) only for the standard notation. The covariance is left unchanged.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -24,6 +35,7 @@ from sklearn.covariance import LedoitWolf
 from src.data import CASH_TICKER
 
 MONTHS_PER_YEAR = 12
+TAU = 0.05
 
 # Reference (market) portfolio for reverse optimisation: a global balanced 50/40/10 portfolio
 # for a CHF investor. Equity weights follow approximate relative market capitalisation (US
@@ -50,8 +62,34 @@ class EstimationError(ValueError):
 
 
 @dataclass
+class View:
+    """A CIO view. Absolute: E[r_long] = value. Relative: E[r_long] - E[r_short] = value.
+    Values are annualised excess returns; selectors map a universe column (or "ticker") to a
+    value or list of values, e.g. {"asset_class": "Equity", "region": "Switzerland"}."""
+    name: str
+    long: dict
+    value: float
+    confidence: float = 0.5
+    short: dict | None = None
+    active: bool = True
+
+
+# Default "House View" for the demo (switch off with active=False or pass views=[]).
+HOUSE_VIEWS = [
+    View("Swiss equities outperform US equities by 1% p.a.",
+         {"asset_class": "Equity", "region": "Switzerland"}, 0.010, 0.50,
+         short={"asset_class": "Equity", "region": "US"}),
+    View("Eurozone and Japanese equities outperform US equities by 0.5% p.a.",
+         {"ticker": ["EZU", "EWJ"]}, 0.005, 0.30, short={"asset_class": "Equity", "region": "US"}),
+    View("Gold earns 3% p.a. above SARON", {"ticker": "GLD"}, 0.030, 0.30),
+    View("Swiss government bonds earn 0.5% p.a. above SARON",
+         {"asset_class": "Bond", "region": "Switzerland"}, 0.005, 0.50),
+]
+
+
+@dataclass
 class Estimates:
-    mu: pd.Series          # annualised expected excess returns
+    mu: pd.Series          # annualised expected excess returns (posterior if views are used)
     cov: pd.DataFrame      # annualised covariance
     method: str
     delta: float           # market risk aversion implied by the reference portfolio
@@ -59,6 +97,8 @@ class Estimates:
     shrinkage: float       # Ledoit-Wolf intensity on correlations
     start: pd.Timestamp
     end: pd.Timestamp
+    prior: pd.Series | None = None                      # equilibrium returns before views
+    views: pd.DataFrame = field(default_factory=pd.DataFrame)  # view, Q, prior and posterior
 
 
 def estimation_window(returns: pd.DataFrame, end: pd.Timestamp, months: int,
@@ -88,11 +128,17 @@ def _risky(columns) -> list[str]:
 
 
 def ledoit_wolf_cov(excess: pd.DataFrame) -> tuple[pd.DataFrame, float]:
-    """Annualised covariance: Ledoit-Wolf shrinkage applied to the correlation matrix.
+    """Annualised covariance: Ledoit-Wolf shrinkage applied to the CORRELATION matrix.
 
-    Returns are standardised before fitting, so the shrinkage pulls correlations toward zero
-    while each asset keeps its own sample volatility. (Shrinking the raw covariance toward a
-    scaled identity would inflate the volatility of low-risk CHF bonds several-fold.)
+    Returns are standardised (each asset divided by its sample volatility) before fitting
+    sklearn's LedoitWolf, whose target is a scaled identity. On standardised data that target
+    is "all correlations zero, all variances equal to one", so the shrinkage only pulls
+    correlations toward zero; the result is rescaled by the sample volatilities, which are
+    therefore preserved exactly.
+    Why not shrink the raw covariance: its identity target has the AVERAGE variance of the
+    universe on the diagonal, which inflates low-risk assets. On the 60 months to 2026-09 the
+    Swiss govt 0-3y ETF would go from 1.6% to 5.3% volatility (3-7y: 3.4% -> 6.0%), making CHF
+    bonds look as risky as gold to the optimiser.
     """
     risky = _risky(excess.columns)
     x = excess[risky]
@@ -142,19 +188,85 @@ def shrunk_mean(excess: pd.DataFrame, shrinkage: float = 0.5) -> pd.Series:
     return mu.rename("mu")
 
 
+def basket(selector: dict, universe: pd.DataFrame, w_ref: pd.Series) -> pd.Series:
+    """Weights of a view basket over w_ref.index (reference-weighted, equal if no reference weight)."""
+    tickers = w_ref.index
+    mask = pd.Series(True, index=tickers)
+    for col, val in selector.items():
+        values = list(val) if isinstance(val, (list, tuple, set)) else [val]
+        if col == "ticker":
+            mask &= tickers.isin(values)
+        elif col in universe.columns:
+            mask &= universe.loc[tickers, col].isin(values)
+        else:
+            raise EstimationError(f"Unknown view selector '{col}'.")
+    if not mask.any():
+        raise EstimationError(f"View basket {selector} matches no selected asset.")
+    w = w_ref[mask] if w_ref[mask].sum() > 0 else mask[mask].astype(float)
+    return (w / w.sum()).reindex(tickers, fill_value=0.0)
+
+
+def view_matrices(views: list[View], universe: pd.DataFrame, w_ref: pd.Series):
+    """P (views x assets), Q and confidences for the active views."""
+    active = [v for v in views if v.active]
+    rows = []
+    for v in active:
+        if not 0 < v.confidence <= 1:
+            raise EstimationError(f"Confidence of view '{v.name}' must be in (0, 100%].")
+        p = basket(v.long, universe, w_ref)
+        if v.short is not None:
+            p = p - basket(v.short, universe, w_ref)
+        rows.append(p)
+    names = [v.name for v in active]
+    P = pd.DataFrame(rows, index=names, columns=w_ref.index)
+    return P, pd.Series([v.value for v in active], index=names), \
+        pd.Series([v.confidence for v in active], index=names)
+
+
+def black_litterman(prior: pd.Series, cov: pd.DataFrame, P: pd.DataFrame, Q: pd.Series,
+                    confidence: pd.Series, tau: float = TAU) -> pd.Series:
+    """Posterior expected returns (formula and Omega convention in the module docstring)."""
+    if P.empty:
+        return prior.copy()
+    S, Pm = cov.values, P.values
+    psp = Pm @ S @ Pm.T
+    omega = np.diag((1 / confidence.values - 1) * tau * np.diag(psp))
+    try:
+        adj = np.linalg.solve(tau * psp + omega, Q.values - Pm @ prior.values)
+    except np.linalg.LinAlgError as exc:
+        raise EstimationError("Views are redundant or contradictory at 100% confidence.") from exc
+    return pd.Series(prior.values + tau * S @ Pm.T @ adj, index=prior.index, name="mu")
+
+
 def estimate(returns: pd.DataFrame, rf: pd.Series, method: str = "equilibrium",
-             mean_shrinkage: float = 0.5) -> Estimates:
-    """Expected excess returns and covariance from one estimation window of monthly returns."""
+             mean_shrinkage: float = 0.5, views: list[View] | None = None,
+             universe: pd.DataFrame | None = None) -> Estimates:
+    """Expected excess returns and covariance from one estimation window of monthly returns.
+    `views` (Black-Litterman) apply to the equilibrium prior only and need `universe` tags."""
     if returns.isna().any().any():
         raise EstimationError("The estimation window contains missing returns.")
     ex = excess_returns(returns, rf)
     cov, lw_shrinkage = ledoit_wolf_cov(ex)
     w_ref = reference_weights(list(ex.columns))
     delta = implied_risk_aversion(cov, w_ref)
+    view_table = pd.DataFrame()
     if method == "equilibrium":
-        mu = equilibrium_returns(cov, w_ref, delta)
+        prior = equilibrium_returns(cov, w_ref, delta)
+        mu = prior
+        if views and any(v.active for v in views):
+            if universe is None:
+                raise EstimationError("Views need the universe tags.")
+            P, Q, conf = view_matrices(views, universe, w_ref)
+            mu = black_litterman(prior, cov, P, Q, conf)
+            view_table = pd.DataFrame({"view": Q, "confidence": conf,
+                                       "prior": P.values @ prior.values, "posterior": P.values @ mu.values})
     elif method == "shrunk_mean":
-        mu = shrunk_mean(ex, mean_shrinkage)
+        if views and any(v.active for v in views):
+            raise EstimationError("House views can only be combined with equilibrium returns.")
+        prior, mu = None, shrunk_mean(ex, mean_shrinkage)
     else:
         raise EstimationError(f"Unknown expected-return method '{method}'.")
-    return Estimates(mu, cov, method, delta, w_ref, lw_shrinkage, ex.index[0], ex.index[-1])
+    if CASH_TICKER in mu:
+        mu[CASH_TICKER] = 0.0
+    return Estimates(mu, cov, method, delta, w_ref, lw_shrinkage, ex.index[0], ex.index[-1],
+                     prior, view_table)
