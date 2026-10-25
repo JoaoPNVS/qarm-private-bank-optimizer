@@ -96,8 +96,8 @@ def test_inactive_constraint_is_ignored(pdata):
 
 
 def test_infeasibility_is_diagnosed(pdata):
-    # no cash allowed and a 2% volatility cap: impossible with equities only
-    cons = [vol_cap(0.02), opt.exclusions(sectors=["Cash"])]
+    # no bonds or cash allowed and a 2% volatility cap: impossible with equities and gold only
+    cons = [vol_cap(0.02), opt.exclusions(sectors=["Bonds", "Cash"])]
     res = opt.solve(pdata, cons)
     assert not res.ok and res.weights is None
     assert set(res.diagnosis.conflicting) == {"exclusions", "max_volatility"}

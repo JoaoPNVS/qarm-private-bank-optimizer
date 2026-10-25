@@ -46,6 +46,11 @@ def test_shrinkage_toward_class_mean(window, universe):
     assert half[data.CASH_TICKER] == 0
 
 
+def test_shrinkage_keeps_bonds_below_equities(estimates, universe):
+    cls = universe["asset_class"].reindex(estimates.mu.index)
+    assert estimates.mu[cls == "Bond"].mean() < estimates.mu[cls == "Equity"].mean()
+
+
 def test_eligibility_drops_short_histories():
     ret = data.load_returns()
     early = est.estimation_window(ret, pd.Timestamp("2015-06-30"), 60)

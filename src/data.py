@@ -13,8 +13,9 @@ import pandas as pd
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CASH_TICKER = "CASH_USD"
 BENCHMARK_TICKERS = ["SPY", "AGG"]
-UNIVERSE_COLUMNS = ["ticker", "name", "asset_class", "sector", "isin_country", "index",
-                    "listed_currency", "data_start"]
+UNIVERSE_COLUMNS = ["ticker", "name", "asset_class", "sector", "vehicle", "is_EM", "bond_type",
+                    "isin_country", "index", "listed_currency", "data_start"]
+VEHICLES = {"Stock", "ETF", "Cash"}
 ASSET_CLASSES = {"Equity", "Bond", "Commodity", "Cash"}
 
 
@@ -46,6 +47,10 @@ def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     bad_class = set(uni["asset_class"]) - ASSET_CLASSES
     if bad_class:
         raise DataError(f"Unknown asset classes {sorted(bad_class)}")
+    if uni["is_EM"].dtype != bool:
+        raise DataError("Column 'is_EM' must contain only True/False.")
+    if set(uni["vehicle"]) - VEHICLES:
+        raise DataError(f"Unknown vehicles {sorted(set(uni['vehicle']) - VEHICLES)}")
     if (uni["listed_currency"] != "USD").any():
         raise DataError("Every asset must be USD-listed (no currency conversion in this project).")
     return uni.set_index("ticker")

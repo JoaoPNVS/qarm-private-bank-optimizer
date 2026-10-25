@@ -1,7 +1,14 @@
 """Build data/universe.csv ONCE (the result is committed; the app never runs this).
 
 Universe = all Nasdaq-100 companies + the largest other S&P 500 companies by market cap, up to
-N_STOCKS US-listed stocks (one share class per company), and synthetic USD cash (3-month T-bill).
+N_STOCKS US-listed stocks (one share class per company), plus fixed ETFs (international
+equities, USD bonds by type, gold) and synthetic USD cash (3-month T-bill). Everything is USD.
+
+Tags: `vehicle` (Stock / ETF / Cash: 8% cap per stock, 20% cap per ETF), `is_EM` (EEM and the
+emerging-market companies PDD and MELI count toward the EM <= 1/3 of equities rule; other
+foreign companies listed in the US are developed-market), `bond_type` for bond ETFs.
+International equity ETFs share the sector "International" (capped like any equity sector);
+bond and gold ETFs have their own sectors and are not subject to the sector cap.
 
 Sources (snapshot at build time):
 - constituents: Wikipedia "List of NASDAQ-100 companies" and "List of S&P 500 companies";
@@ -31,9 +38,22 @@ DROP_SHARE_CLASSES = {"GOOG", "FOX", "NWS"}  # keep GOOGL, FOXA, NWSA
 YAHOO_TO_GICS = {"Technology": "Information Technology", "Healthcare": "Health Care",
                  "Consumer Cyclical": "Consumer Discretionary", "Consumer Defensive": "Consumer Staples",
                  "Financial Services": "Financials", "Basic Materials": "Materials"}
-NON_EQUITY = [
-    ("CASH_USD", "Cash USD (3-month T-bill)", "Cash", "Cash", "US", "USD"),
+EM_COMPANIES = {"PDD", "MELI"}  # China, Latin America
+# ticker, name, asset_class, sector, vehicle, is_EM, bond_type
+FIXED_ASSETS = [
+    ("VGK", "Vanguard FTSE Europe ETF", "Equity", "International", "ETF", False, ""),
+    ("EWJ", "iShares MSCI Japan ETF", "Equity", "International", "ETF", False, ""),
+    ("EEM", "iShares MSCI Emerging Markets ETF", "Equity", "International", "ETF", True, ""),
+    ("SHY", "iShares 1-3 Year Treasury Bond ETF", "Bond", "Bonds", "ETF", False, "Short-term"),
+    ("IEF", "iShares 7-10 Year Treasury Bond ETF", "Bond", "Bonds", "ETF", False, "Treasury 7-10y"),
+    ("LQD", "iShares iBoxx $ Investment Grade Corporate Bond ETF", "Bond", "Bonds", "ETF", False, "Corporate IG"),
+    ("HYG", "iShares iBoxx $ High Yield Corporate Bond ETF", "Bond", "Bonds", "ETF", False, "High Yield"),
+    ("TIP", "iShares TIPS Bond ETF", "Bond", "Bonds", "ETF", False, "TIPS"),
+    ("GLD", "SPDR Gold Shares", "Commodity", "Gold", "ETF", False, ""),
+    ("CASH_USD", "Cash USD (3-month T-bill)", "Cash", "Cash", "Cash", False, ""),
 ]
+COLUMNS = ["ticker", "name", "asset_class", "sector", "vehicle", "is_EM", "bond_type", "isin_country",
+           "index", "listed_currency", "data_start"]
 
 
 def wiki_table(url: str, column: str) -> pd.DataFrame:
@@ -84,13 +104,11 @@ def main() -> None:
     stocks = pd.concat([ndx, extra])
     if stocks.index.duplicated().any() or len(stocks) != N_STOCKS:
         sys.exit("ERROR: duplicated tickers or wrong universe size")
-    stocks = stocks.assign(asset_class="Equity", listed_currency="USD").sort_values(["sector", "name"])
-    rest = pd.DataFrame(NON_EQUITY, columns=["ticker", "name", "asset_class", "sector", "isin_country",
-                                             "listed_currency"]).set_index("ticker").assign(index="")
-    uni = pd.concat([stocks, rest]).reset_index()
-    uni["data_start"] = ""
-    cols = ["ticker", "name", "asset_class", "sector", "isin_country", "index", "listed_currency", "data_start"]
-    uni[cols].to_csv(DATA_DIR / "universe.csv", index=False)
+    stocks = stocks.assign(asset_class="Equity", vehicle="Stock", bond_type="",
+                           is_EM=stocks.index.isin(EM_COMPANIES)).sort_values(["sector", "name"])
+    fixed = pd.DataFrame(FIXED_ASSETS, columns=COLUMNS[:7]).set_index("ticker").assign(isin_country="US", index="")
+    uni = pd.concat([stocks, fixed]).reset_index().assign(listed_currency="USD", data_start="")
+    uni[COLUMNS].to_csv(DATA_DIR / "universe.csv", index=False)
     (DATA_DIR / "universe_as_of.txt").write_text(f"Constituents snapshot: {date.today().isoformat()}\n")
     print(f"Saved {len(uni)} assets ({len(stocks)} stocks) to data/universe.csv")
     print(stocks["sector"].value_counts().to_string())
