@@ -52,7 +52,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   - "Cost of constraint": Sharpe / expected utility with vs without each constraint.
   - Efficient frontier: unconstrained vs constrained, client portfolio marked on it,
     weights along the frontier (stacked area).
-- Backtest: rolling estimation window (default 60 months), rebalancing quarterly/semi/annual,
+- Backtest: rolling estimation window (default 60 months, user-adjustable 36–84 months), rebalancing quarterly/semi/annual,
   transaction costs, turnover cap. Compare with: profile benchmark, unconstrained MV, equal weight.
 - Risk: annualized vol, Sharpe, max drawdown, historical VaR/CVaR 95%, risk contributions per
   asset and per asset class, historical stress tests (2008, 2011, 2015 SNB floor removal,
@@ -67,7 +67,7 @@ src/optimizer.py       # cvxpy problem builder, constraint objects, infeasibilit
 src/backtest.py        # rolling backtest engine
 src/risk.py            # metrics, VaR/CVaR, risk contributions, stress tests, Monte Carlo
 src/profiling.py       # questionnaire -> profile -> lambda + default constraints
-src/report.py          # PDF report
+src/report.py          # PDF report (charts drawn with matplotlib — no kaleido)
 scripts/download_data.py
 tests/                 # pytest for optimizer constraints and backtest sanity
 reference/             # friend's app — read-only inspiration, NEVER copy its ERC logic
@@ -83,3 +83,7 @@ reference/             # friend's app — read-only inspiration, NEVER copy its 
 - Cache expensive computations with `st.cache_data`.
 - After each feature: run `pytest` and `streamlit run app.py` headless smoke test before saying done.
 - Keep `requirements.txt` pinned and deployable on Streamlit Community Cloud.
+- Target **Python 3.12** (local `.venv` and Streamlit Cloud "Advanced settings"). The pinned set
+  must stay free of deprecation warnings: `pytest.ini` turns DeprecationWarning/FutureWarning
+  into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), matplotlib 3.10.x
+  (pandas 2.3 plotting warns under 3.11).

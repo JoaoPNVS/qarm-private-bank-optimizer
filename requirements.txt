@@ -1,0 +1,17 @@
+# Python 3.12 — tested together with no deprecation warnings (pip check clean).
+# pandas stays on 2.x: yfinance triggers Pandas4Warning under pandas 3.x.
+# matplotlib stays on 3.10.x: pandas 2.3 plotting triggers MatplotlibDeprecationWarning under 3.11.
+streamlit==1.66.1
+pandas==2.3.3
+numpy==2.5.4
+scipy==1.18.1
+pyarrow==26.0.0
+cvxpy==1.9.3
+clarabel==0.11.1
+scs==3.3.1
+scikit-learn==1.9.1
+plotly==7.1.0
+matplotlib==3.10.9
+fpdf2==2.8.9
+yfinance==1.7.0
+pytest==9.1.1
