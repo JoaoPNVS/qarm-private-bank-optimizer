@@ -52,8 +52,12 @@ Grading criteria (from the professor) — every feature should serve one of thes
   yfinance at runtime (rate limits would break the live demo).
 
 ## Methodology
-- Covariance: Ledoit-Wolf shrinkage. Expected returns: shrunk sample mean (toward grand mean)
-  or equilibrium-implied returns — user can choose; document clearly.
+- Covariance: Ledoit-Wolf shrinkage applied to standardised returns (shrinks correlations, keeps
+  each asset's sample volatility); CASH_CHF is risk-free (zero variance, zero excess return).
+- Expected returns: DEFAULT = equilibrium-implied returns mu = delta·Sigma·w_ref, with the
+  50/40/10 reference portfolio `REFERENCE_WEIGHTS` in `src/estimators.py` and delta set by a 0.35
+  reference Sharpe. Option: sample mean shrunk toward the grand mean. Raw means concentrate the
+  optimiser on past winners (see the module docstring).
 - Optimizer: cvxpy, long-only, fully invested:
   max  wᵀμ − (λ/2) wᵀΣw − c·‖w − w_prev‖₁   subject to all active client constraints.
   Solver: CLARABEL with fallback to SCS/ECOS. If infeasible, the app tells the user WHICH
