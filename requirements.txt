@@ -1,9 +1,10 @@
 # Python 3.12 — tested together with no deprecation warnings (pip check clean).
 # pandas stays on 2.x: yfinance triggers Pandas4Warning under pandas 3.x.
 # matplotlib stays on 3.10.x: pandas 2.3 plotting triggers MatplotlibDeprecationWarning under 3.11.
+# numpy stays on 2.3.x: pandas 2.3 resample triggers DeprecationWarning under numpy 2.5.
 streamlit==1.66.1
 pandas==2.3.3
-numpy==2.5.4
+numpy==2.3.5
 scipy==1.18.1
 pyarrow==26.0.0
 cvxpy==1.9.3

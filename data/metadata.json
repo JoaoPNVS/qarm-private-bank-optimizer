@@ -1,0 +1,14 @@
+{
+  "downloaded_at_utc": "2026-10-25T13:59:04+00:00",
+  "last_month_end": "2026-09-30",
+  "first_return": "1995-02-28",
+  "n_assets": 35,
+  "sources": {
+    "prices": "yfinance daily auto_adjust -> month-end",
+    "fx": [
+      "USDCHF=X",
+      "EURCHF=X"
+    ],
+    "rf": "SNB SARON (https://data.snb.ch/api/cube/zimoma/data/csv/en), lagged 1 month, /1200"
+  }
+}

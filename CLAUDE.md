@@ -33,8 +33,19 @@ Grading criteria (from the professor) — every feature should serve one of thes
   meaningful (each asset tagged with: asset_class, region, currency, is_EM, is_swiss, sector/ESG flag).
   Keep the universe definition in ONE file: `data/universe.csv`.
 - FX: USDCHF=X, EURCHF=X (convert to CHF). Monthly frequency, month-end.
-- Risk-free: use a CHF short-rate proxy; if none is available reliably, a user-settable constant
-  (document this choice).
+- Risk-free: **SARON from the SNB data portal** (cube `zimoma`, free, no API key), downloaded by
+  the same script into `data/rf_chf.parquet`. **Documented exception to the "yfinance only" rule:**
+  yfinance has no reliable CHF short rate. Monthly rf_t = SARON_{t-1} / 1200 (rate known at the
+  start of the month). The app offers a user-settable constant annual rate as fallback
+  (`src.data.constant_rf`). The `CASH_CHF` asset is synthetic and earns this rf.
+- Currency tags: `currency` = economic FX exposure (used by the FX constraint), `listed_currency`
+  = quote currency (used for CHF conversion; only CHF and USD exist, so USDCHF=X suffices).
+  EEM, AAXJ and EMB are tagged `EM-FX` and international funds (BWX, RWX) `Multi`; every
+  currency other than CHF counts as non-CHF exposure (`non_chf` column added by `load_universe`).
+- Data cleaning: `data_start` in universe.csv discards corrupted early Yahoo history
+  (SRECHA.SW before 2011-02, ABBN.SW before 2003). The download script aborts on any monthly
+  CHF return above 60% and warns on daily moves above 25%. Roche is `RO.SW` (ROG.SW is not on
+  Yahoo). Only complete months are kept. Common sample of all 35 assets starts 2011-03.
 - Benchmark: a profile-dependent CHF benchmark (e.g. 60/40 built from universe ETFs).
 - **Data is downloaded once by `scripts/download_data.py` and saved to `data/*.parquet`,
   which are committed to the repo.** The Streamlit app reads parquet only — it must never call
@@ -86,4 +97,4 @@ reference/             # friend's app — read-only inspiration, NEVER copy its 
 - Target **Python 3.12** (local `.venv` and Streamlit Cloud "Advanced settings"). The pinned set
   must stay free of deprecation warnings: `pytest.ini` turns DeprecationWarning/FutureWarning
   into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), matplotlib 3.10.x
-  (pandas 2.3 plotting warns under 3.11).
+  (pandas 2.3 plotting warns under 3.11), numpy 2.3.x (pandas 2.3 resample warns under 2.5).
