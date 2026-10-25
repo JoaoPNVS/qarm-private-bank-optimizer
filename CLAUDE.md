@@ -142,7 +142,11 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
   team section, colors or branding.
 - Every function that can fail (solver, data) must fail gracefully with a clear message in the app.
 - Cache expensive computations with `st.cache_data`.
-- After each feature: run `pytest` and `streamlit run app.py` headless smoke test before saying done.
+- Tests are split with the pytest marker `slow` (app scenarios with Streamlit AppTest, several
+  minutes; the whole of `tests/test_smoke.py`). During development run only the fast tests:
+  `pytest -m "not slow"` (~20 s). Before the final commit of a step run the FULL suite: `pytest`
+  (fast + slow) and a `streamlit run app.py` headless smoke test, then say done.
+- New AppTest scenarios go in `tests/test_smoke.py` (marked slow); everything else stays fast.
 - One commit per finished and tested step, with a clear message.
 - Keep `requirements.txt` pinned and deployable on Streamlit Community Cloud.
 - Target **Python 3.12** (local `.venv` and Streamlit Cloud "Advanced settings"). The pinned set

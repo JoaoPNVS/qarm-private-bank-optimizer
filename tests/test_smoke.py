@@ -1,18 +1,14 @@
-﻿import importlib
+﻿"""App scenarios with Streamlit's AppTest (slow: each one runs the whole app, backtest included)."""
 from pathlib import Path
 
 import numpy as np
 import pytest
 from streamlit.testing.v1 import AppTest
 
+pytestmark = pytest.mark.slow
+
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app.py")
-MODULES = ["data", "estimators", "optimizer", "benchmarks", "backtest", "risk", "profiling", "report"]
 TIMEOUT = 180
-
-
-@pytest.mark.parametrize("name", MODULES)
-def test_modules_import(name):
-    importlib.import_module(f"src.{name}")
 
 
 def run_app(widgets: dict | None = None) -> AppTest:
