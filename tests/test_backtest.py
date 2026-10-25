@@ -93,9 +93,11 @@ def test_infeasible_rebalancing_keeps_weights(inputs, estimates):
 
 def test_infeasible_start_is_a_clear_error(inputs, estimates):
     uni, ret, rf = inputs
-    with pytest.raises(btm.BacktestError, match="first rebalancing"):
+    # 95% in bonds at most 20% per fund needs five bond funds; only four existed in 2008-12
+    with pytest.raises(btm.BacktestError, match="first rebalancing") as err:
         btm.run_backtest(ret, rf, uni, [opt.max_volatility(0.10), opt.min_bonds(0.95), opt.max_etf_weight(0.2)],
                          estimates=estimates)
+    assert "including 4 bond funds" in str(err.value) and "Minimum bonds" in str(err.value)
 
 
 def test_performance_metrics():

@@ -92,7 +92,11 @@ def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
                                  "n_eligible": len(e.mu)})
                 w, invested = target, True
             elif not invested:
-                raise BacktestError(f"Constraints are infeasible at the first rebalancing ({t:%Y-%m}): {res.message}")
+                n_bonds = int((universe["asset_class"].reindex(e.mu.index) == "Bond").sum())
+                raise BacktestError(
+                    f"Constraints are infeasible at the first rebalancing ({t:%B %Y}). At that date only "
+                    f"{len(e.mu)} assets, including {n_bonds} bond funds, had {window} months of history, "
+                    f"so settings that work today may not work then. {res.message}")
             else:
                 events.append(f"{t:%Y-%m}: rebalancing skipped, weights kept ({res.message})")
                 reb_rows.append({"date": t, "status": "skipped", "turnover": 0.0, "cost": 0.0, "initial": False})
