@@ -43,3 +43,9 @@ def test_incompatible_constraints_show_message():
     at = run_app({("selectbox", "profile"): "Conservative", ("slider", "Conservative.etf"): 10})
     assert not at.exception
     assert any("cannot all be satisfied" in e.value for e in at.error)
+
+
+def test_backtest_tab_annual_rebalancing():
+    at = run_app({("selectbox", "bt.freq"): "Annual"})
+    assert not at.exception and not at.error and not at.warning
+    assert any("Average ex-ante volatility" in c.value for c in at.caption)

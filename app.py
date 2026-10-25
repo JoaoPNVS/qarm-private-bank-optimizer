@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import benchmarks as bm, data, estimators as est, optimizer as opt, profiling as prof
+from src import backtest as btm, benchmarks as bm, data, estimators as est, optimizer as opt, profiling as prof, risk
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide")
 
@@ -16,7 +16,7 @@ NAVY, GREY, ACCENT = "#1f3b57", "#a3adb8", "#c0392b"
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
 BOND_TYPES = ["Short-term", "Treasury 7-10y", "Corporate IG", "High Yield", "TIPS"]
 WINDOW = est.DEFAULT_WINDOW
-EXPECTED_ERRORS = (data.DataError, est.EstimationError, ValueError)
+EXPECTED_ERRORS = (data.DataError, est.EstimationError, btm.BacktestError, ValueError)
 
 
 # --- helpers ---------------------------------------------------------------------------------
@@ -62,6 +62,27 @@ def optimise(profile: str, cons_json: str):
     eq = prof.SPECS[profile].benchmark_equity
     te = bm.tracking_error(res.weights, eq, e) if res.ok else np.nan
     return res, bm.ex_ante_stats(eq, e), bm.ex_ante_stats(1.0, e), te
+
+
+@st.cache_data(show_spinner=False)
+def backtest_estimates() -> dict:
+    """Estimates at every quarter-end of the backtest (semi-annual/annual dates are a subset)."""
+    universe, returns, rf, _ = load_data()
+    dates = btm.rebalance_dates(returns.index, btm.DEFAULT_START, "Quarterly")
+    return btm.estimates_by_date(returns, rf, universe["asset_class"], dates)
+
+
+@st.cache_data(show_spinner="Running the backtest (re-optimising at every rebalancing)...")
+def run_backtest(profile: str, cons_json: str, freq: str, tc: float):
+    universe, returns, rf, bench = load_data()
+    res = btm.run_backtest(returns, rf, universe, build_constraints(profile, json.loads(cons_json)),
+                           freq=freq, tc=tc, estimates=backtest_estimates())
+    idx = res.returns.index
+    series = pd.DataFrame({"Strategy": res.returns,
+                           "Profile benchmark": bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity,
+                                                                             bench).reindex(idx),
+                           "SPY": bench["SPY"].reindex(idx)})
+    return res, series
 
 
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
@@ -284,6 +305,61 @@ with tabs[2]:
                 {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
 
 with tabs[3]:
-    st.info("The backtest is being implemented.")
+    st.subheader(f"Backtest — {profile} profile with the client constraints")
+    c1, c2, _ = st.columns([1, 1, 2])
+    freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
+    tc_bps = c2.number_input("Transaction costs (bps per unit traded)", 0, 100, 10, step=5, key="bt.tc")
+    try:
+        bt, series = run_backtest(profile, cons_json, freq, tc_bps / 1e4)
+    except EXPECTED_ERRORS as exc:
+        st.error(f"The backtest could not run: {exc}")
+        bt = None
+    if bt is not None:
+        start, end = series.index[0], series.index[-1]
+        st.caption(f"{start:%B %Y} – {end:%B %Y} ({len(series) / 12:.1f} years). At each rebalancing the portfolio "
+                   f"is re-optimised on the previous {WINDOW} months only (no look-ahead); weights drift in between. "
+                   "**Survivorship bias:** the stock universe is today's index membership, so the strategy's "
+                   "results are an upper bound; SPY and the benchmark are not affected.")
+        for ev in bt.events:
+            st.warning(ev)
+        metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
+        metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
+        metrics["Turnover p.a."] = [btm.annual_turnover(bt), np.nan, np.nan]
+        st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
+                                             "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
+            {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
+             "Final wealth (USD)": lambda x: usd(x), "Turnover p.a.": lambda x: "" if pd.isna(x) else f"{x:.0%}"}),
+            width="stretch")
+
+        growth = wealth * (1 + series).cumprod()
+        f = go.Figure([go.Scatter(x=growth.index, y=growth[k], name=k, line=dict(color=clr, width=w_, dash=dash))
+                       for k, clr, w_, dash in (("Strategy", NAVY, 3, "solid"), ("Profile benchmark", GREY, 2, "solid"),
+                                                ("SPY", ACCENT, 2, "dot"))])
+        f.update_layout(title=f"Growth of {usd(wealth)}", yaxis_title="USD", yaxis_type="log")
+        st.plotly_chart(fig_layout(f, 430), width="stretch")
+
+        reb = bt.rebalances[bt.rebalances["status"] == "ok"]
+        left, right = st.columns(2, gap="large")
+        f = go.Figure([go.Scatter(x=reb.index, y=reb["ex_ante_vol"] * 100, name="Ex-ante (promised)",
+                                  line=dict(color=NAVY, width=3)),
+                       go.Scatter(x=reb.index, y=reb["realised_vol"] * 100, name="Realised (next 12 months)",
+                                  line=dict(color=ACCENT, width=2))])
+        f.update_layout(title="Volatility promised vs realised at each rebalancing", yaxis_title="% p.a.")
+        left.plotly_chart(fig_layout(f, 380), width="stretch")
+        left.caption(f"Average ex-ante volatility {reb['ex_ante_vol'].mean():.1%}; average realised over the next "
+                     f"12 months {reb['realised_vol'].mean():.1%}; realised over the whole backtest "
+                     f"{metrics.loc['Strategy', 'volatility']:.1%}.")
+        dd = pd.DataFrame({k: risk.drawdowns(series[k]) for k in series}) * 100
+        f = go.Figure([go.Scatter(x=dd.index, y=dd[k], name=k, line=dict(color=clr))
+                       for k, clr in (("Strategy", NAVY), ("Profile benchmark", GREY), ("SPY", ACCENT))])
+        f.update_layout(title="Drawdowns", yaxis_title="%")
+        right.plotly_chart(fig_layout(f, 380), width="stretch")
+
+        alloc = bt.weights.T.groupby(universe.loc[bt.weights.columns, "asset_class"]).sum().T.reindex(columns=CLASS_ORDER)
+        f = go.Figure([go.Scatter(x=alloc.index, y=alloc[c] * 100, name=c, stackgroup="one", mode="none",
+                                  fillcolor=clr) for c, clr in zip(CLASS_ORDER, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+        f.update_layout(title="Allocation by asset class over time (month-end, after drift)", yaxis_title="%",
+                        yaxis_range=[0, 100])
+        st.plotly_chart(fig_layout(f, 360), width="stretch")
 with tabs[4]:
     st.info("The wealth simulation will be added in the next step.")
