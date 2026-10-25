@@ -1,4 +1,4 @@
-"""Suitability questionnaire -> risk profile -> lambda, CHF benchmark and default constraints.
+"""Suitability questionnaire -> risk profile -> volatility cap, CHF benchmark and default constraints.
 
 Inspired by the LSFin/FIDLEG suitability test (art. 12 LSFin: the client's financial situation,
 investment objectives, and knowledge & experience). Seven questions, each answer scored 1-4:
@@ -17,11 +17,8 @@ Each profile has a CHF benchmark built from the universe (strategic allocation w
 home bias), and default constraints set around it. Every benchmark satisfies its own default
 constraints (tested), so the defaults are always feasible.
 
-Risk aversion: lambda = REFERENCE_SHARPE / sigma(benchmark). Rationale: with equilibrium returns
-and a risk-free asset, the unconstrained optimum for risk aversion lambda is
-(delta / lambda) * w_ref + rest in cash, whose volatility is (delta / lambda) * sigma_ref =
-Sharpe / lambda. Choosing lambda = Sharpe / sigma_benchmark therefore targets the risk level of
-the profile benchmark. lambda depends on the estimation window (it is recomputed with Sigma).
+Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
+return under that cap (src/optimizer.py).
 """
 from __future__ import annotations
 
@@ -31,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from src import optimizer as opt
-from src.estimators import REFERENCE_SHARPE, Estimates
+from src.estimators import Estimates
 
 PROFILES = ["Conservative", "Balanced", "Growth", "Dynamic"]
 LEVEL_CUTOFFS = [1.75, 2.50, 3.25]
@@ -145,7 +142,7 @@ SPECS = {
          "EMB": .02, "IEF": .01, "GLD": .03, "SRECHA.SW": .04, "CASH_CHF": .03},
         {"Equity": (0.35, 0.60), "Bond": (0.30, 0.50), "Alternative": (0.0, 0.15),
          "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.30, max_non_chf=0.40, max_volatility=0.09, max_tracking_error=0.03),
+        max_weight=0.15, home_bias=0.30, max_non_chf=0.40, max_volatility=0.10, max_tracking_error=0.03),
     "Growth": ProfileSpec(
         "Growth", "Long-term capital growth; 70% equities, accepts significant fluctuations.",
         {"CSSMI.SW": .15, "CSSMIM.SW": .07, "SPY": .15, "QQQ": .04, "IWM": .03, "EZU": .08, "EWU": .03,
@@ -153,7 +150,7 @@ SPECS = {
          "HYG": .02, "EMB": .02, "GLD": .04, "SRECHA.SW": .03, "VNQ": .02, "CASH_CHF": .01},
         {"Equity": (0.55, 0.80), "Bond": (0.10, 0.35), "Alternative": (0.0, 0.15),
          "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.25, max_non_chf=0.65, max_volatility=0.12, max_tracking_error=0.04),
+        max_weight=0.15, home_bias=0.25, max_non_chf=0.65, max_volatility=0.14, max_tracking_error=0.04),
     "Dynamic": ProfileSpec(
         "Dynamic", "Maximum long-term growth; 90% equities, accepts large drawdowns.",
         {"CSSMI.SW": .15, "CSSMIM.SW": .10, "SPY": .15, "QQQ": .08, "IWM": .05, "EZU": .10, "EWU": .04,
@@ -161,7 +158,7 @@ SPECS = {
          "VNQ": .02},
         {"Equity": (0.75, 1.00), "Bond": (0.0, 0.20), "Alternative": (0.0, 0.15),
          "Real Estate": (0.0, 0.10), "Cash": (0.0, 0.10)},
-        max_weight=0.15, home_bias=0.20, max_non_chf=0.75, max_volatility=0.15, max_tracking_error=0.05),
+        max_weight=0.15, home_bias=0.20, max_non_chf=0.75, max_volatility=0.18, max_tracking_error=0.05),
 }
 
 
@@ -171,12 +168,6 @@ def benchmark_weights(profile: str, tickers: list[str]) -> pd.Series:
     if w.sum() <= 0:
         raise ValueError(f"No asset of the {profile} benchmark is in the selection.")
     return (w / w.sum()).rename("benchmark")
-
-
-def risk_aversion(profile: str, cov: pd.DataFrame) -> float:
-    """lambda = REFERENCE_SHARPE / benchmark volatility (see module docstring)."""
-    b = benchmark_weights(profile, list(cov.index))
-    return REFERENCE_SHARPE / float(np.sqrt(b @ cov @ b))
 
 
 def default_constraints(profile: str) -> list[opt.Constraint]:
@@ -198,5 +189,5 @@ def default_constraints(profile: str) -> list[opt.Constraint]:
 def problem_data(profile: str, estimates: Estimates, universe: pd.DataFrame,
                  w_prev: pd.Series | None = None, tc: float = 0.001) -> opt.ProblemData:
     tickers = list(estimates.mu.index)
-    return opt.ProblemData(estimates.mu, estimates.cov, universe, risk_aversion(profile, estimates.cov),
+    return opt.ProblemData(estimates.mu, estimates.cov, universe,
                            w_prev=w_prev, tc=tc, benchmark=benchmark_weights(profile, tickers))

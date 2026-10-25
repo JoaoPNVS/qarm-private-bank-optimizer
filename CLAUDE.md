@@ -4,7 +4,8 @@
 A Streamlit web app for the HEC Lausanne course *Quantitative Asset and Risk Management II*.
 We act as a Swiss private bank / wealth manager. Our client is a **demanding Swiss private
 client (CHF-based) with many investment constraints**. The app builds an optimal constrained
-portfolio, backtests it, and explains to the client what each constraint costs him.
+portfolio (maximum expected return under the profile's volatility cap), backtests it
+and simulates the client's wealth.
 
 Grading criteria (from the professor) — every feature should serve one of these:
 1. Content: complexity of client & data, strategy covers the client's needs, uses course tools
@@ -17,10 +18,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - Swiss resident, reference currency **CHF**. All returns are converted to CHF.
 - Risk profile from an **LSFIN/FIDLEG-style suitability questionnaire** (horizon, loss tolerance,
   experience, income stability, objective) → profile Conservative / Balanced / Growth / Dynamic →
-  maps to a risk-aversion parameter λ and to default constraint values.
+  maps to a volatility cap (risk budget) and to default constraint values.
   Implemented in `src/profiling.py` (7 questions: capacity / willingness / knowledge; profile =
-  lower of capacity and willingness, knowledge cap, <3y horizon knock-out; λ = 0.35 / σ(profile
-  benchmark); each profile's CHF benchmark satisfies its own default constraints).
+  lower of capacity and willingness, knowledge cap, <3y horizon knock-out; each profile has a volatility cap and a CHF benchmark).
 - Example constraints (all must be editable in the app):
   - Emerging-market equities ≤ 1/3 of total equity exposure (ratio constraint, linear form)
   - Swiss equities ≥ X% of equity exposure (home bias)
@@ -55,33 +55,27 @@ Grading criteria (from the professor) — every feature should serve one of thes
   yfinance at runtime (rate limits would break the live demo).
 
 ## Methodology
-- Covariance: Ledoit-Wolf shrinkage applied to standardised returns (shrinks correlations, keeps
-  each asset's sample volatility); CASH_CHF is risk-free (zero variance, zero excess return).
-- Expected returns: DEFAULT = equilibrium-implied returns mu = delta·Sigma·w_ref, with the
-  50/40/10 reference portfolio `REFERENCE_WEIGHTS` in `src/estimators.py` and delta set by a 0.35
-  reference Sharpe. Option: sample mean shrunk toward the grand mean. Raw means concentrate the
-  optimiser on past winners (see the module docstring).
-- House views (Black-Litterman on the equilibrium prior): absolute or relative views on tickers or
-  tag-based baskets (reference-weighted), each with a confidence c; Omega_k = (1/c - 1)·tau·p'Σp
-  (c = 50% = He-Litterman), tau = 0.05 (cancels out of the posterior mean). Default demo set
-  `HOUSE_VIEWS` (4 views), switchable off. No active view => exactly the equilibrium returns.
-- Extra constraints: regional bands on the share of EQUITIES per region (so no profile drops
-  Europe or Japan), optional max tracking error vs the profile benchmark. Constraint costs are
-  shown in bps and in CHF per year on the client's wealth.
-- Optimizer: cvxpy, long-only, fully invested:
-  max  wᵀμ − (λ/2) wᵀΣw − c·‖w − w_prev‖₁   subject to all active client constraints.
-  Solver: CLARABEL with fallback to SCS/ECOS. If infeasible, the app tells the user WHICH
-  constraints conflict (re-solve dropping one at a time) instead of crashing.
-- Constraint analysis (our key differentiator):
-  - Dual values (shadow prices) of each constraint from cvxpy.
-  - "Cost of constraint": Sharpe / expected utility with vs without each constraint.
-  - Efficient frontier: unconstrained vs constrained, client portfolio marked on it,
-    weights along the frontier (stacked area).
-- Backtest: rolling estimation window (default 60 months, user-adjustable 36–84 months), rebalancing quarterly/semi/annual,
-  transaction costs, turnover cap. Compare with: profile benchmark, unconstrained MV, equal weight.
-- Risk: annualized vol, Sharpe, max drawdown, historical VaR/CVaR 95%, risk contributions per
-  asset and per asset class, historical stress tests (2008, 2011, 2015 SNB floor removal,
-  2020 Covid, 2022 rates), Monte Carlo (block bootstrap) for wealth projection.
+- **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully
+  invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
+  (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
+  The volatility cap is mandatory (without it the problem puts everything in one asset).
+- Expected returns: historical mean over the estimation window (default 60 months), shrunk
+  toward the grand mean of the asset's own class: mu_i = (1 - a) m_i + a m_class, a = 0.5 by
+  default (raw 5-year means are mostly noise; shrinking within each class keeps bonds from
+  inheriting equity returns). See `src/estimators.py`.
+- Covariance: Ledoit-Wolf applied to standardised returns (shrinks correlations toward zero,
+  keeps each asset's sample volatility exactly; the identity target on raw returns would inflate
+  low-risk CHF bonds); CASH_CHF is risk-free (zero variance, zero excess return).
+- Eligibility: an asset enters the optimisation only once it has a complete 60-month history.
+- Removed in the October 2026 redesign: equilibrium returns, Black-Litterman house views,
+  risk-aversion lambda, cost of constraints, efficient frontier / minimum variance.
+- Infeasibility: the optimiser never crashes; a deletion filter names the minimal set of
+  conflicting constraints and the ones whose removal alone restores feasibility. Shadow prices
+  (dual values) of binding constraints are kept, in bps of expected return per +1pp.
+- Solver: CLARABEL with fallback to SCS.
+- Backtest: rolling estimation window (default 60 months, user-adjustable 36–84 months), rebalancing
+  quarterly/semi/annual, transaction costs. Compare with SPY in CHF and the profile benchmark.
+- Risk: annualized vol, Sharpe, max drawdown; Monte Carlo (block bootstrap) for wealth projection.
 
 ## Code organisation
 ```
@@ -91,7 +85,7 @@ src/estimators.py      # mu and covariance estimators
 src/optimizer.py       # cvxpy problem builder, constraint objects, infeasibility diagnosis
 src/backtest.py        # rolling backtest engine
 src/risk.py            # metrics, VaR/CVaR, risk contributions, stress tests, Monte Carlo
-src/profiling.py       # questionnaire -> profile -> lambda + default constraints
+src/profiling.py       # questionnaire -> profile -> volatility cap + default constraints
 src/report.py          # PDF report (charts drawn with matplotlib — no kaleido)
 scripts/download_data.py
 tests/                 # pytest for optimizer constraints and backtest sanity

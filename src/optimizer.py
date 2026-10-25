@@ -1,10 +1,12 @@
 """cvxpy portfolio problem builder, constraint objects and infeasibility diagnosis.
 
 Problem (long-only, fully invested, annualised excess returns):
-    max  w'mu - (lambda/2) w'Sigma w - c * ||w - w_prev||_1   s.t. active client constraints.
-The objective is the certainty-equivalent excess return, so utility differences and shadow
-prices read directly as "annual return given up". Shadow prices are reported per +1 percentage
-point of relaxation of the constraint bound (in basis points of certainty-equivalent return).
+    max  w'mu - c * ||w - w_prev||_1
+    s.t. sqrt(w'Sigma w) <= sigma_max (volatility cap of the client's profile, mandatory)
+         and the other active client constraints.
+The transaction-cost term only applies when current holdings w_prev are given (backtest).
+Shadow prices are reported per +1 percentage point of relaxation of the constraint bound, in
+basis points of expected return per year.
 
 Nothing here raises on an infeasible or failed solve: results carry a status and, when
 infeasible, a diagnosis naming the conflicting constraints.
@@ -23,10 +25,7 @@ OK_STATUSES = {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}
 INFEASIBLE_STATUSES = {cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE}
 ACTIVE_DUAL_TOL = 1e-6
 TOL = 1e-6
-
-
-class OptimizationError(RuntimeError):
-    """Raised only by helpers that need a solvable base problem (e.g. cost_of_constraints)."""
+VOL_KEY = "max_volatility"
 
 
 @dataclass
@@ -34,7 +33,6 @@ class ProblemData:
     mu: pd.Series                     # annualised expected excess returns
     cov: pd.DataFrame                 # annualised covariance
     universe: pd.DataFrame            # tags indexed by ticker (src.data.load_universe)
-    risk_aversion: float
     w_prev: pd.Series | None = None   # current holdings; enables turnover cost/constraint
     tc: float = 0.0                   # proportional transaction cost per unit traded
     benchmark: pd.Series | None = None  # profile benchmark; enables the tracking-error constraint
@@ -183,8 +181,10 @@ def max_turnover(limit: float = 0.50) -> Constraint:
 
 
 def max_volatility(limit: float = 0.10) -> Constraint:
+    """The risk budget of the profile. Mandatory: without it the problem would put everything
+    in the single asset with the highest expected return."""
     return Constraint(
-        "max_volatility", "Maximum volatility", {"limit": limit},
+        VOL_KEY, "Maximum volatility", {"limit": limit},
         lambda w, d, p: [Part(f"Volatility <= {p['limit']:.0%}", cp.norm(d.sqrt_cov @ w, 2) <= p["limit"])],
         lambda p: f"Expected annual volatility at most {p['limit']:.0%}.")
 
@@ -217,7 +217,6 @@ class OptimizationResult:
     expected_return: float = np.nan
     volatility: float = np.nan
     sharpe: float = np.nan
-    utility: float = np.nan
     turnover: float = np.nan
     tracking_error: float = np.nan
     duals: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -252,9 +251,9 @@ def _build_all(w, data, constraints) -> list[tuple[Constraint, Part]]:
     return [(c, part) for c in constraints if c.active for part in c.build(w, data)]
 
 
-def _objective(w, data, with_costs: bool = True):
-    obj = data.mu.values @ w - data.risk_aversion / 2 * cp.sum_squares(data.sqrt_cov @ w)
-    if with_costs and data.w_prev is not None and data.tc > 0:
+def _objective(w, data):
+    obj = data.mu.values @ w
+    if data.w_prev is not None and data.tc > 0:
         obj -= data.tc * cp.norm1(w - data.w_prev.values)
     return obj
 
@@ -264,15 +263,12 @@ def portfolio_stats(weights: pd.Series, data: ProblemData) -> dict:
     ret = float(data.mu.values @ w)
     vol = float(np.sqrt(max(w @ data.cov.values @ w, 0.0)))
     turnover = float(np.abs(w - data.w_prev.values).sum()) if data.w_prev is not None else np.nan
-    cost = data.tc * turnover if data.w_prev is not None else 0.0
     te = np.nan
     if data.benchmark is not None:
         a = w - data.benchmark.values
         te = float(np.sqrt(max(a @ data.cov.values @ a, 0.0)))
     return {"expected_return": ret, "volatility": vol,
-            "sharpe": ret / vol if vol > TOL else np.nan,
-            "utility": ret - data.risk_aversion / 2 * vol ** 2 - cost, "turnover": turnover,
-            "tracking_error": te}
+            "sharpe": ret / vol if vol > TOL else np.nan, "turnover": turnover, "tracking_error": te}
 
 
 def _dual_table(pairs: list[tuple[Constraint, Part]]) -> pd.DataFrame:
@@ -318,6 +314,8 @@ def diagnose_infeasibility(data: ProblemData, constraints: list[Constraint]) -> 
 
 
 def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = True) -> OptimizationResult:
+    if not any(c.key == VOL_KEY and c.active for c in constraints):
+        return OptimizationResult("invalid", message="A maximum volatility (the profile's risk budget) is required.")
     w = cp.Variable(len(data.tickers))
     pairs = _build_all(w, data, constraints)
     problem = cp.Problem(cp.Maximize(_objective(w, data)), _base(w) + [p.constraint for _, p in pairs])
@@ -332,60 +330,3 @@ def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = Tru
         return OptimizationResult(cp.INFEASIBLE, diagnosis=diag,
                                   message=diag.message if diag else "The constraints are incompatible.")
     return OptimizationResult(status, message=f"The solver failed (status: {status}). Try relaxing constraints.")
-
-
-def cost_of_constraints(data: ProblemData, constraints: list[Constraint],
-                        wealth: float | None = None) -> pd.DataFrame:
-    """Re-solve without each active constraint, one at a time. Costs are what the client gives
-    up by imposing it: utility cost >= 0 by construction; the Sharpe cost can be negative because
-    the optimiser maximises utility, not Sharpe. With `wealth` (CHF), the utility cost is also
-    given in CHF per year (certainty-equivalent return given up x wealth)."""
-    base = solve(data, constraints)
-    if not base.ok:
-        raise OptimizationError(base.message)
-    rows = []
-    for c in (c for c in constraints if c.active):
-        res = solve(data, [o for o in constraints if o is not c], diagnose=False)
-        rows.append({"key": c.key, "constraint": c.name, "description": c.description,
-                     "sharpe_with": base.sharpe, "sharpe_without": res.sharpe,
-                     "sharpe_cost": res.sharpe - base.sharpe,
-                     "utility_cost_bps": (res.utility - base.utility) * 1e4,
-                     "return_without": res.expected_return, "vol_without": res.volatility})
-    out = pd.DataFrame(rows).sort_values("utility_cost_bps", ascending=False, ignore_index=True)
-    if wealth is not None:
-        out["utility_cost_chf"] = out["utility_cost_bps"] / 1e4 * wealth
-    return out
-
-
-@dataclass
-class Frontier:
-    points: pd.DataFrame   # columns: volatility, expected_return, sharpe
-    weights: pd.DataFrame  # one row per point, one column per ticker
-    message: str = ""
-
-
-def efficient_frontier(data: ProblemData, constraints: list[Constraint], n_points: int = 20) -> Frontier:
-    """Max expected return for a grid of volatility targets, from the minimum-variance portfolio
-    to the maximum-return portfolio. Pass constraints=[] for the long-only "unconstrained" one.
-    Transaction costs are left out of the frontier (it describes the opportunity set)."""
-    w = cp.Variable(len(data.tickers))
-    cons = _base(w) + [p.constraint for _, p in _build_all(w, data, constraints)]
-    risk = cp.norm(data.sqrt_cov @ w, 2)
-    if _run(cp.Problem(cp.Minimize(risk), cons)) not in OK_STATUSES:
-        return Frontier(pd.DataFrame(), pd.DataFrame(), "No feasible portfolio: the frontier is empty.")
-    vol_min = float(risk.value)
-    _run(cp.Problem(cp.Maximize(data.mu.values @ w), cons))
-    vol_max = float(risk.value)
-    target = cp.Parameter(nonneg=True)
-    problem = cp.Problem(cp.Maximize(data.mu.values @ w), cons + [risk <= target])
-    points, weights = [], []
-    for vol in np.linspace(vol_min, vol_max, n_points):
-        target.value = vol + 1e-9
-        if _run(problem) not in OK_STATUSES:
-            continue
-        wt = pd.Series(np.clip(w.value, 0, None), index=data.tickers)
-        wt /= wt.sum()
-        s = portfolio_stats(wt, data)
-        points.append({k: s[k] for k in ("volatility", "expected_return", "sharpe")})
-        weights.append(wt)
-    return Frontier(pd.DataFrame(points), pd.DataFrame(weights).reset_index(drop=True))

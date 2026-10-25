@@ -13,12 +13,10 @@ def universe():
     return data.load_universe()
 
 
-@pytest.fixture(scope="module", params=["equilibrium", "house_views"])
-def estimates(request, universe):
+@pytest.fixture(scope="module")
+def estimates(universe):
     ret = data.load_returns()
-    views = est.HOUSE_VIEWS if request.param == "house_views" else None
-    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(),
-                        views=views, universe=universe)
+    return est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), universe["asset_class"])
 
 
 def test_extreme_answers():
@@ -67,11 +65,9 @@ def test_optimal_portfolio_feasible_and_diversified(profile, universe, estimates
         assert res.weights[eq & (universe["region"] == region)].sum() > 0.005
 
 
-def test_risk_increases_with_profile(universe, estimates):
-    lam, vol = [], []
-    for p in prof.PROFILES:
-        d = prof.problem_data(p, estimates, universe)
-        lam.append(d.risk_aversion)
-        vol.append(opt.solve(d, prof.default_constraints(p)).volatility)
-    assert lam == sorted(lam, reverse=True)
-    assert vol == sorted(vol)
+def test_risk_and_return_increase_with_profile(universe, estimates):
+    caps = [prof.SPECS[p].max_volatility for p in prof.PROFILES]
+    assert caps == sorted(caps)
+    res = [opt.solve(prof.problem_data(p, estimates, universe), prof.default_constraints(p)) for p in prof.PROFILES]
+    vols, rets = [r.volatility for r in res], [r.expected_return for r in res]
+    assert vols == sorted(vols) and rets == sorted(rets)
