@@ -26,11 +26,11 @@ def test_profile_benchmark_is_the_stated_mix(series):
 
 
 @pytest.mark.parametrize("profile", prof.PROFILES)
-def test_volatility_cap_not_below_benchmark_risk(series, profile):
+def test_volatility_cap_calibrated_on_benchmark(series, profile):
     _, bench = series
     s = prof.SPECS[profile]
     vol = bm.profile_benchmark_returns(s.benchmark_equity, bench).loc["2003-10-31":].std() * np.sqrt(12)
-    assert vol <= s.max_volatility < vol + 0.02
+    assert np.isclose(s.max_volatility, np.ceil(vol * 100) / 100)  # rounded up to the next percent
 
 
 def test_benchmark_equity_increases_with_profile():

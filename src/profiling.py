@@ -121,13 +121,13 @@ class ProfileSpec:
         return round(1 - self.benchmark_equity, 2)
 
 
-# Volatility caps validated by the team; calibration on the USD benchmarks gives 6/10/12/15%
-# (pending decision for Growth and Dynamic), see src/benchmarks.py.
+# Volatility cap = historical volatility of the profile benchmark (2003-10 to 2026-09) rounded up
+# to the next percent: 5.91 / 9.28 / 11.85 / 14.52% -> 6 / 10 / 12 / 15%, see src/benchmarks.py.
 SPECS = {
     "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30),
     "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60),
-    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.13, 0.80),
-    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.16, 1.00),
+    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.12, 0.80),
+    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.15, 1.00),
 }
 MAX_CASH = 0.10
 MAX_STOCK_WEIGHT = 0.08

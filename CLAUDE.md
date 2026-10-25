@@ -34,15 +34,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
   |--------------|--------:|-------------------:|-----------------------------|
   | Conservative |      6% |                70% | 30 / 70                     |
   | Balanced     |     10% |                40% | 60 / 40                     |
-  | Growth       |     13% |                20% | 80 / 20                     |
-  | Dynamic      |     16% |                 0% | 100 / 0                     |
+  | Growth       |     12% |                20% | 80 / 20                     |
+  | Dynamic      |     15% |                 0% | 100 / 0                     |
 
   Calibration rule for the vol caps: historical volatility of the profile benchmark rounded UP
   to the next percent, so the optimised portfolio takes the same risk as its benchmark.
-  Re-checked on the USD benchmarks (2003-10 to 2026-09): vols 5.91 / 9.28 / 11.85 / 14.52%,
-  i.e. the rule gives 6 / 10 / **12 / 15%**. The caps above (validated on the earlier CHF data)
-  are kept until the team decides on Growth and Dynamic. Invariant tested in
-  `tests/test_benchmarks.py`: no cap is below its benchmark's historical volatility.
+  Measured on the USD benchmarks (2003-10 to 2026-09): vols 5.91 / 9.28 / 11.85 / 14.52%, hence
+  the caps 6 / 10 / 12 / 15% (team decision; the rule is tested in `tests/test_benchmarks.py`).
   The bond floor equals the benchmark's bond share. It applies to bond funds only: with cash
   counted, the 2021-2026 window (bonds lost money against T-bills) filled every floor with cash.
 

@@ -7,9 +7,8 @@ starts in 1998-02.
 
 Volatility caps are calibrated on these benchmarks: historical benchmark volatility rounded UP
 to the next full percent, so the optimised portfolio takes the same risk as its benchmark.
-Measured on USD data 2003-10 to 2026-09: 5.91% / 9.28% / 11.85% / 14.52%, i.e. caps
-6 / 10 / 12 / 15%. The caps in use (6 / 10 / 13 / 16%) were validated on the earlier CHF data;
-the difference for Growth and Dynamic is pending a team decision (see CLAUDE.md).
+Measured on USD data 2003-10 to 2026-09: 5.91% / 9.28% / 11.85% / 14.52%, hence caps
+6 / 10 / 12 / 15% (tested in tests/test_benchmarks.py).
 """
 from __future__ import annotations
 
