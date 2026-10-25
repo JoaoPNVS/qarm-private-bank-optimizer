@@ -54,11 +54,11 @@ def test_default_portfolio_feasible(profile, universe, estimates):
 
 
 def test_bond_floors_and_default_caps():
-    floors = {p: next(c for c in prof.default_constraints(p) if c.key == "min_defensive").params["min_share"]
+    floors = {p: next(c for c in prof.default_constraints(p) if c.key == "min_bonds").params["min_share"]
               for p in prof.PROFILES}
     assert floors == {"Conservative": 0.70, "Balanced": 0.40, "Growth": 0.20, "Dynamic": 0.0}
     params = {c.key: c.params for c in prof.default_constraints("Balanced")}
-    assert params["max_stock_weight"]["limit"] == 0.08 and params["max_etf_weight"]["limit"] == 0.20
+    assert params["max_cash"]["limit"] == 0.10 and params["max_stock_weight"]["limit"] == 0.08 and params["max_etf_weight"]["limit"] == 0.20
     assert params["max_sector_weight"]["limit"] == 0.40 and abs(params["em_equity_cap"]["ratio"] - 1 / 3) < 1e-12
 
 

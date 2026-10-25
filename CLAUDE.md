@@ -27,9 +27,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
   (<1.75 Conservative, <2.50 Balanced, <3.25 Growth, otherwise Dynamic); the profile is the
   LOWER of the two; knowledge caps it ("none" -> at most Balanced, "basic" -> at most Growth);
   a horizon below 3 years always gives Conservative.
-- Each profile sets a **volatility cap** (risk budget) and a **floor on bonds + cash**:
+- Each profile sets a **volatility cap** (risk budget) and a **floor on bond funds** (cash does
+  not count):
 
-  | Profile      | Vol cap | Bonds + cash floor | Benchmark (SPY / USD bonds) |
+  | Profile      | Vol cap | Bond floor         | Benchmark (SPY / USD bonds) |
   |--------------|--------:|-------------------:|-----------------------------|
   | Conservative |      6% |                70% | 30 / 70                     |
   | Balanced     |     10% |                40% | 60 / 40                     |
@@ -42,12 +43,14 @@ Grading criteria (from the professor) — every feature should serve one of thes
   i.e. the rule gives 6 / 10 / **12 / 15%**. The caps above (validated on the earlier CHF data)
   are kept until the team decides on Growth and Dynamic. Invariant tested in
   `tests/test_benchmarks.py`: no cap is below its benchmark's historical volatility.
-  The bonds + cash floor equals the benchmark's bond share.
+  The bond floor equals the benchmark's bond share. It applies to bond funds only: with cash
+  counted, the 2021-2026 window (bonds lost money against T-bills) filled every floor with cash.
 
 ## Client constraints (`src/optimizer.py`; simple, explainable, all editable in the app)
 - Maximum volatility = the profile's risk budget (mandatory).
-- Minimum share in bonds + cash = the profile's floor (active by default, can be changed).
-- Max weight per single stock: 8% (ETFs and cash are not capped by this rule).
+- Minimum share in bond funds = the profile's floor (active by default, can be changed).
+- Maximum cash: 10% (active by default, can be changed).
+- Max weight per single stock: 8%; max weight per ETF: 20%.
 - Max weight per equity sector: 40%.
 - Emerging markets ≤ 1/3 of the equity allocation (linear form: EM ≤ (1/3)·equities).
 - Exclusions of sectors or individual companies.

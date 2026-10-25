@@ -36,7 +36,7 @@ def test_volatility_cap_not_below_benchmark_risk(series, profile):
 def test_benchmark_equity_increases_with_profile():
     shares = [prof.SPECS[p].benchmark_equity for p in prof.PROFILES]
     assert shares == sorted(shares) and shares[-1] == 1.0
-    assert np.isclose(prof.SPECS["Balanced"].min_defensive, 0.40)
+    assert np.isclose(prof.SPECS["Balanced"].min_bonds, 0.40)
 
 
 def test_ex_ante_stats(estimates, series):

@@ -65,7 +65,7 @@ def binding_cases(pdata):
         opt.max_sector_weight(top_sector.max() / 2),
         opt.exclusions(tickers=[top_stock]),
         opt.exclusions(sectors=[top_sector.idxmax()]),
-        opt.min_defensive(min(0.9, w[uni["asset_class"].isin(["Bond", "Cash"])].sum() + 0.3)),
+        opt.min_bonds(min(0.9, w[uni["asset_class"] == "Bond"].sum() + 0.3)),
     ]
 
 
@@ -77,6 +77,15 @@ def test_each_constraint_respected_and_binding(pdata):
         assert res.ok, c.key
         assert satisfied(c, res.weights, pdata) and satisfied(vol_cap(), res.weights, pdata), c.key
         assert res.duals["active"].any()
+
+
+def test_max_cash(pdata, universe):
+    cash = universe["asset_class"] == "Cash"
+    free = opt.solve(pdata, [vol_cap(0.02)]).weights.reindex(universe.index).fillna(0)
+    assert free[cash].sum() > 0.2  # a low risk budget pushes the free solution into cash
+    c = opt.max_cash(0.10)
+    res = opt.solve(pdata, [vol_cap(0.02), c])
+    assert res.ok and satisfied(c, res.weights, pdata) and satisfied(vol_cap(0.02), res.weights, pdata)
 
 
 def test_exclusions_by_sector_and_ticker(pdata, universe):
@@ -95,7 +104,7 @@ def test_transaction_costs_reduce_trading(estimates, universe):
 
 
 def test_inactive_constraint_is_ignored(pdata):
-    c = opt.min_defensive(0.9)
+    c = opt.min_bonds(0.9)
     c.active = False
     assert np.allclose(opt.solve(pdata, [vol_cap(), c]).weights, free_solution(pdata), atol=1e-6)
 

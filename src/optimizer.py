@@ -158,15 +158,27 @@ def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = Non
                       {"tickers": list(tickers or []), "sectors": list(sectors or [])}, build, describe)
 
 
-def min_defensive(min_share: float = 0.20) -> Constraint:
-    """Minimum share in bonds and cash (the profile's floor)."""
+def min_bonds(min_share: float = 0.20) -> Constraint:
+    """Minimum share in bond funds (the profile's floor; cash does not count)."""
     def build(w, d, p):
-        m = d.mask(d.universe["asset_class"].isin(["Bond", "Cash"]))
-        return [Part(f"Bonds + cash >= {p['min_share']:.0%}", m @ w >= p["min_share"])]
+        if p["min_share"] <= 0:
+            return []
+        m = d.mask(d.universe["asset_class"] == "Bond")
+        return [Part(f"Bonds >= {p['min_share']:.0%}", m @ w >= p["min_share"])]
 
     return Constraint(
-        "min_defensive", "Minimum bonds and cash", {"min_share": min_share}, build,
-        lambda p: f"At least {p['min_share']:.0%} of the portfolio in bonds and cash.")
+        "min_bonds", "Minimum bonds", {"min_share": min_share}, build,
+        lambda p: f"At least {p['min_share']:.0%} of the portfolio in bond funds.")
+
+
+def max_cash(limit: float = 0.10) -> Constraint:
+    def build(w, d, p):
+        m = d.mask(d.universe["asset_class"] == "Cash")
+        return [Part(f"Cash <= {p['limit']:.0%}", m @ w <= p["limit"])]
+
+    return Constraint(
+        "max_cash", "Maximum cash", {"limit": limit}, build,
+        lambda p: f"At most {p['limit']:.0%} of the portfolio in cash.")
 
 
 # --- solving --------------------------------------------------------------------------------

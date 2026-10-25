@@ -15,10 +15,11 @@ Mapping, kept deliberately simple so it can be explained to the client:
 
 Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
 return under that cap (src/optimizer.py), and a benchmark mixing SPY and US aggregate bonds
-(src/benchmarks.py). Each profile also sets a floor on bonds + cash equal to its
-benchmark's bond share (70 / 40 / 20 / 0%), active by default. The other default constraints are
-the same for every profile: at most 8% per stock, 20% per ETF, 40% per equity sector
-(international ETFs as one group), emerging markets at most 1/3 of equities, no exclusions.
+(src/benchmarks.py). Each profile also sets a floor on bond funds (cash does not count) equal
+to its benchmark's bond share (70 / 40 / 20 / 0%), active by default. The other default
+constraints are the same for every profile: at most 10% cash, 8% per stock, 20% per ETF, 40% per
+equity sector (international ETFs as one group), emerging markets at most 1/3 of equities, no
+exclusions.
 """
 from __future__ import annotations
 
@@ -115,8 +116,8 @@ class ProfileSpec:
     benchmark_equity: float    # SPY share of the profile benchmark, the rest in AGG
 
     @property
-    def min_defensive(self) -> float:
-        """Bonds + cash floor of the profile: the benchmark's bond share."""
+    def min_bonds(self) -> float:
+        """Bond floor of the profile: the benchmark's bond share."""
         return round(1 - self.benchmark_equity, 2)
 
 
@@ -128,6 +129,7 @@ SPECS = {
     "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.13, 0.80),
     "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.16, 1.00),
 }
+MAX_CASH = 0.10
 MAX_STOCK_WEIGHT = 0.08
 MAX_ETF_WEIGHT = 0.20
 MAX_SECTOR_WEIGHT = 0.40
@@ -136,7 +138,7 @@ EM_EQUITY_CAP = 1 / 3
 
 def default_constraints(profile: str) -> list[opt.Constraint]:
     s = SPECS[profile]
-    return [opt.max_volatility(s.max_volatility), opt.min_defensive(s.min_defensive),
+    return [opt.max_volatility(s.max_volatility), opt.min_bonds(s.min_bonds), opt.max_cash(MAX_CASH),
             opt.max_stock_weight(MAX_STOCK_WEIGHT), opt.max_etf_weight(MAX_ETF_WEIGHT),
             opt.max_sector_weight(MAX_SECTOR_WEIGHT), opt.em_equity_cap(EM_EQUITY_CAP), opt.exclusions()]
 

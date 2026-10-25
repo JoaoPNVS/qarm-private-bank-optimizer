@@ -21,6 +21,8 @@ def satisfied(c, w, d):
     if c.key == "exclusions":
         out = uni["sector"].isin(p["sectors"]) | uni.index.isin(p["tickers"])
         return w[out].abs().sum() <= TOL
-    if c.key == "min_defensive":
-        return w[uni["asset_class"].isin(["Bond", "Cash"])].sum() >= p["min_share"] - TOL
+    if c.key == "min_bonds":
+        return w[uni["asset_class"] == "Bond"].sum() >= p["min_share"] - TOL
+    if c.key == "max_cash":
+        return w[uni["asset_class"] == "Cash"].sum() <= p["limit"] + TOL
     raise KeyError(c.key)
