@@ -4,9 +4,10 @@ At each rebalancing date t (a month-end), the expected returns and covariance ar
 the 60 months up to and including t (only assets with a complete window are eligible), the
 portfolio is re-optimised with the client constraints, and trades are executed at the close of
 t. Between two rebalancings the weights drift with the assets' returns. Transaction costs are
-`tc` (default 10 bps) per unit traded, charged on the month after the trade; the first
-rebalancing pays the cost of building the portfolio from cash. The optimiser also sees the cost
-(L1 penalty), so it does not trade for negligible gains.
+asset-specific (universe.csv tc_bps, by liquidity tier): sum_i c_i |w_i - w_prev_i|, charged on
+the month after the trade; the first rebalancing pays the cost of building the portfolio from
+cash. With `penalize_costs` (default) the optimiser also sees these costs (L1 penalty), so it
+does not trade for negligible gains; without it costs are only charged afterwards.
 
 If a rebalancing is infeasible (e.g. after the client tightened a constraint), the portfolio
 keeps its drifted weights and the event is recorded; an infeasible FIRST rebalancing is an error.
@@ -32,7 +33,6 @@ from src import estimators as est, optimizer as opt
 
 FREQ_MONTHS = {"Quarterly": 3, "Semi-annual": 6, "Annual": 12}
 DEFAULT_START = pd.Timestamp("2012-01-31")
-DEFAULT_TC = 0.001
 REALISED_HORIZON = 12
 
 
@@ -67,12 +67,14 @@ def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
 
 
 def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
-                 constraints: list[opt.Constraint], freq: str = "Quarterly", tc: float = DEFAULT_TC,
+                 constraints: list[opt.Constraint], freq: str = "Quarterly", tc: pd.Series | None = None,
                  start: pd.Timestamp = DEFAULT_START, window: int = est.DEFAULT_WINDOW,
-                 estimates: dict | None = None) -> BacktestResult:
+                 estimates: dict | None = None, penalize_costs: bool = True) -> BacktestResult:
+    """tc: cost per unit traded for each asset (default: universe tc_bps / 1e4)."""
     rebals = rebalance_dates(returns.index, start, freq)
     estimates = estimates or {}
     tickers = list(returns.columns)
+    tc = (universe["tc_bps"] / 1e4 if tc is None else tc).reindex(tickers).fillna(0.0)
     months = returns.index[returns.index >= rebals[0]]
     w = pd.Series(0.0, index=tickers)
     w_rows, ret_rows, reb_rows, events = {}, {}, [], []
@@ -82,12 +84,13 @@ def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
         if t in rebals:
             e = estimates.get(t) or est.estimate(est.estimation_window(returns, t, window), rf,
                                                  est.shrinkage_groups(universe))
-            d = opt.ProblemData(e.mu, e.cov, universe, w_prev=w if invested else None, tc=tc)
+            d = opt.ProblemData(e.mu, e.cov, universe, w_prev=w if invested else None,
+                                tc=tc if penalize_costs else 0.0)
             res = opt.solve(d, constraints, diagnose=not invested)
             if res.ok:
                 target = res.weights.reindex(tickers).fillna(0.0)
                 turnover = float((target - w).abs().sum())
-                pending_cost = tc * turnover
+                pending_cost = float(tc @ (target - w).abs())
                 reb_rows.append({"date": t, "status": "ok", "expected_return": res.expected_return,
                                  "ex_ante_vol": res.volatility, "turnover": turnover, "cost": pending_cost,
                                  "initial": not invested, "n_positions": int((target > 0.005).sum()),
@@ -117,6 +120,12 @@ def run_backtest(returns: pd.DataFrame, rf: pd.Series, universe: pd.DataFrame,
         strat.loc[strat.index > t].head(REALISED_HORIZON).std() * np.sqrt(12)
         if (strat.index > t).sum() >= REALISED_HORIZON else np.nan for t in reb.index]
     return BacktestResult(strat, pd.DataFrame(w_rows).T, reb, events)
+
+
+def annual_cost(result: BacktestResult) -> float:
+    """Average trading costs paid per year (fraction of the portfolio), initial investment included."""
+    years = len(result.returns) / 12
+    return float(result.rebalances["cost"].sum() / years) if years > 0 else np.nan
 
 
 def annual_turnover(result: BacktestResult) -> float:

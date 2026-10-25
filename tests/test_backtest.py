@@ -65,7 +65,18 @@ def test_returns_drift_and_costs(inputs, balanced):
     assert np.isclose(balanced.returns[nxt], (1 + gross) * (1 - reb.loc[t, "cost"]) - 1)
     if nxt not in reb.index:  # weights drift with returns between rebalancings
         assert np.allclose(balanced.weights.loc[nxt], w * (1 + r) / (1 + gross))
-    assert np.isclose(reb["cost"].sum(), btm.DEFAULT_TC * reb["turnover"].sum())
+    uni_tc = (data.load_universe()["tc_bps"] / 1e4).reindex(balanced.weights.columns).fillna(0)
+    expected = []
+    for t in reb.index:  # cost = sum_i c_i |target_i - drifted_i|, drifted from the previous month-end
+        pos = balanced.weights.index.get_loc(t)
+        if pos == 0:
+            before = pd.Series(0.0, index=uni_tc.index)  # first rebalancing: bought from cash
+        else:
+            w0 = balanced.weights.iloc[pos - 1]
+            r_ = ret.loc[t].reindex(w0.index).fillna(0)
+            before = w0 * (1 + r_) / (1 + w0 @ r_)
+        expected.append(float(uni_tc @ (balanced.weights.loc[t] - before).abs()))
+    assert np.allclose(reb["cost"], expected)
     assert reb.loc[reb.index[0], "initial"] and np.isclose(reb["turnover"].iloc[0], 1.0)
 
 
@@ -121,3 +132,12 @@ def test_default_constraints_feasible_at_every_rebalancing(inputs, estimates, pr
     bond = uni["asset_class"] == "Bond"
     floor = prof.SPECS[profile].min_bonds
     assert (res.weights.loc[res.rebalances.index, bond[res.weights.columns].values].sum(axis=1) >= floor - 1e-6).all()
+
+
+def test_cost_penalty_reduces_trading(inputs, estimates):
+    uni, ret, rf = inputs
+    cons = prof.default_constraints("Balanced")
+    with_penalty = btm.run_backtest(ret, rf, uni, cons, estimates=estimates)
+    without = btm.run_backtest(ret, rf, uni, cons, estimates=estimates, penalize_costs=False)
+    assert btm.annual_turnover(with_penalty) < btm.annual_turnover(without)
+    assert btm.annual_cost(with_penalty) < btm.annual_cost(without)

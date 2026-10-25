@@ -95,10 +95,10 @@ def backtest_estimates() -> dict:
 
 
 @st.cache_data(show_spinner="Running the backtest (re-optimising at every rebalancing)...")
-def run_backtest(profile: str, cons_json: str, freq: str, tc: float):
+def run_backtest(profile: str, cons_json: str, freq: str):
     universe, returns, rf, bench = load_data()
     res = btm.run_backtest(returns, rf, universe, build_constraints(profile, json.loads(cons_json)),
-                           freq=freq, tc=tc, estimates=backtest_estimates())
+                           freq=freq, estimates=backtest_estimates())
     idx = res.returns.index
     series = pd.DataFrame({"Strategy": res.returns,
                            bench_label(profile): bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity,
@@ -355,14 +355,21 @@ with tabs[2], guarded("Portfolio"):
         with st.expander("Full allocation in USD"):
             table = pd.DataFrame({"Asset": [label(t) for t in w.index], "Class": uni["asset_class"].values,
                                   "Sector / type": np.where(is_bond, uni["bond_type"], uni["sector"]),
-                                  "Weight": w.values, "Amount (USD)": w.values * wealth}, index=w.index)
+                                  "Weight": w.values, "Amount (USD)": w.values * wealth,
+                                  "Liquidity": uni["liquidity_tier"].values,
+                                  "Trading cost (bps)": uni["tc_bps"].values}, index=w.index)
             shown = table[table["Weight"] > 1e-4].sort_values("Weight", ascending=False)
             dust = table.loc[(table["Weight"] > 0) & (table["Weight"] <= 1e-4), ["Weight", "Amount (USD)"]].sum()
             if dust["Weight"] > 0:  # solver residuals: listed as one line so the table sums to 100%
                 shown.loc["_other"] = {"Asset": "Other positions below 0.01%", "Class": "", "Sector / type": "",
-                                       "Weight": dust["Weight"], "Amount (USD)": dust["Amount (USD)"]}
-            st.dataframe(shown.style.format({"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x)}),
+                                       "Weight": dust["Weight"], "Amount (USD)": dust["Amount (USD)"],
+                                       "Liquidity": "", "Trading cost (bps)": np.nan}
+            st.dataframe(shown.style.format({"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x),
+                                             "Trading cost (bps)": lambda x: "" if pd.isna(x) else f"{x:.0f}"}),
                          hide_index=True, width="stretch")
+            st.caption("Trading cost = estimated cost of buying or selling one dollar of the asset (spread and "
+                       "market impact), by liquidity tier: stocks by average daily dollar volume over the last "
+                       "12 months (2 / 5 / 10 bps), high-yield and EM bond funds 8 bps, other funds 3 bps, cash 0.")
         with st.expander("Binding constraints"):
             act = res.duals[res.duals["active"]]
             st.caption("Gain in expected return (bps p.a.) if the bound were relaxed by 1 percentage point.")
@@ -372,11 +379,10 @@ with tabs[2], guarded("Portfolio"):
 
 with tabs[3], guarded("Backtest"):
     st.subheader(f"Backtest — {profile} profile with the client constraints")
-    c1, c2, _ = st.columns([1, 1, 2])
+    c1, _ = st.columns([1, 3])
     freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
-    tc_bps = c2.number_input("Transaction costs (bps per unit traded)", 0, 100, 10, step=5, key="bt.tc")
     try:
-        bt, series = run_backtest(profile, cons_json, freq, tc_bps / 1e4)
+        bt, series = run_backtest(profile, cons_json, freq)
     except EXPECTED_ERRORS as exc:
         st.error(f"The backtest could not run: {exc}")
         bt = None
@@ -391,10 +397,12 @@ with tabs[3], guarded("Backtest"):
         metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
         metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
         metrics["Turnover p.a."] = [btm.annual_turnover(bt), np.nan, np.nan]
+        metrics["Trading costs p.a."] = [btm.annual_cost(bt), np.nan, np.nan]
         st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
                                              "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
             {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
-             "Final wealth (USD)": lambda x: usd(x), "Turnover p.a.": lambda x: "" if pd.isna(x) else f"{x:.0%}"}),
+             "Final wealth (USD)": lambda x: usd(x), "Turnover p.a.": lambda x: "" if pd.isna(x) else f"{x:.0%}",
+             "Trading costs p.a.": lambda x: "" if pd.isna(x) else f"{x * 1e4:.1f} bps"}),
             width="stretch")
         if spec_p.benchmark_equity >= 1:
             st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")

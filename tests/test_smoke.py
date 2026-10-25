@@ -197,8 +197,6 @@ def test_changes_propagate_no_stale_cache():
     at.selectbox(key="bt.freq").set_value("Annual")
     at.run(timeout=TIMEOUT)
     assert backtest_metrics(at).loc["Strategy", "Turnover p.a."] < m1.loc["Strategy", "Turnover p.a."]
-    at.number_input(key="bt.tc").set_value(50)
-    at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
 
 

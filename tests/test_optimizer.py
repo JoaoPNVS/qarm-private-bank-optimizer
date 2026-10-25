@@ -132,6 +132,16 @@ def test_transaction_costs_reduce_trading(estimates, universe):
     assert opt.solve(costly, [vol_cap()]).turnover < opt.solve(free, [vol_cap()]).turnover
 
 
+def test_per_asset_costs_in_the_objective(estimates, universe):
+    # start from 50% AAPL; a prohibitive cost on AAPL only keeps the position, a zero cost does not
+    w_prev = pd.Series({"AAPL": 0.5, data.CASH_TICKER: 0.5})
+    tc = pd.Series(0.0, index=universe.index)
+    cheap = opt.solve(opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=tc), [vol_cap()])
+    tc["AAPL"] = 1.0
+    sticky = opt.solve(opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=tc), [vol_cap()])
+    assert abs(sticky.weights["AAPL"] - 0.5) < abs(cheap.weights["AAPL"] - 0.5)
+
+
 def test_inactive_constraint_is_ignored(pdata):
     c = opt.min_bonds(0.9)
     c.active = False

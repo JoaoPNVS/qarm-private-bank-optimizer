@@ -155,5 +155,7 @@ def default_constraints(profile: str) -> list[opt.Constraint]:
 
 
 def problem_data(profile: str, estimates: Estimates, universe: pd.DataFrame,
-                 w_prev: pd.Series | None = None, tc: float = 0.001) -> opt.ProblemData:
+                 w_prev: pd.Series | None = None, tc: pd.Series | float | None = None) -> opt.ProblemData:
+    """tc defaults to each asset's trading cost (universe tc_bps)."""
+    tc = universe["tc_bps"] / 1e4 if tc is None else tc
     return opt.ProblemData(estimates.mu, estimates.cov, universe, w_prev=w_prev, tc=tc)

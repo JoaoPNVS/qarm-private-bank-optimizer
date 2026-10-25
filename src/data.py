@@ -15,8 +15,9 @@ CASH_TICKER = "CASH_USD"
 BENCHMARK_TICKERS = ["SPY", "AGG"]
 UNIVERSE_COLUMNS = ["ticker", "name", "asset_class", "sector", "vehicle", "is_EM", "bond_type", "issuer_type",
                     "maturity_bucket", "duration", "wam", "credit_quality", "avg_rating", "rating_score",
-                    "char_source", "char_as_of", "isin_country", "index", "listed_currency", "data_start"]
-NUMERIC_COLUMNS = ["duration", "wam", "rating_score"]  # bond funds only, NaN elsewhere
+                    "char_source", "char_as_of", "isin_country", "index", "listed_currency", "data_start",
+                    "adv_usd_m", "liquidity_tier", "tc_bps"]
+NUMERIC_COLUMNS = ["duration", "wam", "rating_score", "adv_usd_m", "tc_bps"]  # NaN where not applicable
 VEHICLES = {"Stock", "ETF", "Cash"}
 ASSET_CLASSES = {"Equity", "Bond", "Commodity", "Cash"}
 
@@ -44,7 +45,8 @@ def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
                       na_values={c: [""] for c in ["data_start"] + NUMERIC_COLUMNS})
     missing = set(UNIVERSE_COLUMNS) - set(uni.columns)
     if missing:
-        raise DataError(f"universe.csv is missing columns {sorted(missing)}")
+        hint = " Run `python scripts/download_data.py` (it adds the trading costs)." if "tc_bps" in missing else ""
+        raise DataError(f"universe.csv is missing columns {sorted(missing)}.{hint}")
     if uni["ticker"].duplicated().any():
         raise DataError(f"Duplicated tickers: {uni.loc[uni['ticker'].duplicated(), 'ticker'].tolist()}")
     bad_class = set(uni["asset_class"]) - ASSET_CLASSES
@@ -57,6 +59,8 @@ def load_universe(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     bonds = uni["bond_type"] != ""  # bond funds and cash-equivalent funds (BIL, FLOT) carry fund tags
     if uni.loc[bonds, NUMERIC_COLUMNS].isna().any().any() or not uni.loc[bonds, "credit_quality"].isin(["IG", "HY"]).all():
         raise DataError("Every bond fund needs duration, maturity, rating and IG/HY tags in universe.csv.")
+    if uni["tc_bps"].isna().any() or (uni["tc_bps"] < 0).any():
+        raise DataError("Every asset needs a non-negative trading cost (tc_bps) in universe.csv.")
     if (uni["listed_currency"] != "USD").any():
         raise DataError("Every asset must be USD-listed (no currency conversion in this project).")
     return uni.set_index("ticker")

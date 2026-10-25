@@ -126,10 +126,19 @@ Grading criteria (from the professor) — every feature should serve one of thes
   correlations toward zero and keeps each asset's sample volatility exactly; the identity
   target on raw returns would inflate low-risk bond volatilities).
 - Solver: cvxpy with CLARABEL, fallback SCS.
+- **Transaction costs, asset-specific** (no slider): `scripts/download_data.py` computes each
+  asset's average daily dollar volume (unadjusted close x volume, 12 months to the last
+  month-end) and writes `adv_usd_m`, `liquidity_tier`, `tc_bps` to universe.csv. Tiers (cost per
+  unit traded, one way): stocks >= $2bn/day 2 bps (43 stocks), $0.5-2bn 5 bps (85), < $0.5bn
+  10 bps (22) — the 12 months to 2026-09 have a median of $1.2bn; high-yield / EM bond funds
+  (HYG, EMB) 8 bps; every other fund (bond funds, BIL, FLOT, equity funds, gold) 3 bps, not
+  tiered by volume because ETF liquidity comes from the underlying (VGK: $0.26bn a day, 1-2 bp
+  spread); cash 0. The optimiser penalises sum_i c_i |w_i - w_prev_i| and the backtest charges
+  the same costs. Run `build_universe.py` before `download_data.py` (the build rewrites the CSV).
 - **Backtest** (`src/backtest.py`): common start at the 2012-01-31 rebalancing (first date with
   five eligible bond funds: 70% bonds at 15% per fund), rolling 60-month window, rebalancing
   every 3 months from the start (or
-  semi-annual / annual), transaction costs 10 bps per unit traded. Compared with SPY and the
+  semi-annual / annual), asset-specific transaction costs (see below). Compared with SPY and the
   profile benchmark: annualised return, volatility, Sharpe, max drawdown. It must compare the
   **ex-ante volatility promised** at each rebalancing with the **realised volatility**.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks) of the client's

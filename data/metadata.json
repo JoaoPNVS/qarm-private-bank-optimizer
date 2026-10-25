@@ -1,5 +1,5 @@
 {
-  "downloaded_at_utc": "2026-10-25T16:31:38+00:00",
+  "downloaded_at_utc": "2026-10-25T17:41:18+00:00",
   "currency": "USD",
   "last_month_end": "2026-09-30",
   "first_return": "1998-02-28",
@@ -11,5 +11,6 @@
       "AGG"
     ],
     "rf": "^IRX (3-month T-bill, % p.a.), lagged 1 month, /1200"
-  }
+  },
+  "liquidity": "average daily dollar volume, 12 months to 2026-09-30"
 }

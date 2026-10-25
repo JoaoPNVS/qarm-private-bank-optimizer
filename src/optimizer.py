@@ -1,7 +1,7 @@
 """cvxpy portfolio problem builder, constraint objects and infeasibility diagnosis.
 
 Problem (long-only, fully invested, annualised excess returns):
-    max  w'mu - c * ||w - w_prev||_1
+    max  w'mu - sum_i c_i |w_i - w_prev_i|   (c_i: trading cost of asset i, see universe.csv tc_bps)
     s.t. sqrt(w'Sigma w) <= sigma_max (volatility cap of the client's profile, mandatory)
          and the other active client constraints.
 The transaction-cost term only applies when current holdings w_prev are given (backtest).
@@ -34,7 +34,7 @@ class ProblemData:
     cov: pd.DataFrame                 # annualised covariance
     universe: pd.DataFrame            # tags indexed by ticker (src.data.load_universe)
     w_prev: pd.Series | None = None   # current holdings; enables turnover cost/constraint
-    tc: float = 0.0                   # proportional transaction cost per unit traded
+    tc: float | pd.Series = 0.0       # cost per unit traded: one rate, or one rate per asset
 
     def __post_init__(self):
         tickers = self.mu.index
@@ -42,6 +42,10 @@ class ProblemData:
         self.cov = self.cov.loc[tickers, tickers]
         if self.w_prev is not None:
             self.w_prev = self.w_prev.reindex(tickers).fillna(0.0)
+        if isinstance(self.tc, pd.Series):
+            self.tc_vec = self.tc.reindex(tickers).fillna(0.0).values
+        else:
+            self.tc_vec = np.full(len(tickers), float(self.tc))
         vals, vecs = np.linalg.eigh(self.cov.values)
         self.sqrt_cov = vecs @ np.diag(np.sqrt(np.clip(vals, 0, None))) @ vecs.T
 
@@ -286,8 +290,8 @@ def _build_all(w, data, constraints) -> list[tuple[Constraint, Part]]:
 
 def _objective(w, data):
     obj = data.mu.values @ w
-    if data.w_prev is not None and data.tc > 0:
-        obj -= data.tc * cp.norm1(w - data.w_prev.values)
+    if data.w_prev is not None and data.tc_vec.any():
+        obj -= data.tc_vec @ cp.abs(w - data.w_prev.values)  # sum_i c_i |w_i - w_prev_i|
     return obj
 
 

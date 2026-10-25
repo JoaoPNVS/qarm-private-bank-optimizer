@@ -8,6 +8,9 @@ Sources (all yfinance)
 - Risk-free: 3-month T-bill yield ^IRX (% p.a.); monthly rf_t = IRX_{t-1} / 1200, i.e. the
   rate known at the start of the month. CASH_USD earns rf.
 - Benchmarks (not investable): SPY (S&P 500) and AGG (US aggregate bonds).
+- Liquidity and trading costs: average daily dollar volume (unadjusted close x volume) over the
+  12 months to the last month-end, written to universe.csv (adv_usd_m, liquidity_tier, tc_bps).
+  Run scripts/build_universe.py first: it rewrites universe.csv without these columns.
 
 Usage:  python scripts/download_data.py
 """
@@ -34,6 +37,13 @@ MAX_ABS_DAILY_MOVE = 1.00       # a single-day move above 100% is printed for a 
 REVIEWED_MOVES = {
     ("REGN", "2000-02"): "biotech bubble: $13 -> $56 over the month on 10-20x normal volume",
 }
+# Trading cost per unit traded (one way, bps), by liquidity tier. Stocks are tiered by average
+# daily dollar volume (12 months to 2026-09: median $1.2bn, 43 stocks >= $2bn, 22 < $500m).
+# ETFs are not tiered by volume (their liquidity comes from the underlying via creation and
+# redemption: VGK trades $0.26bn a day with a 1-2 bp spread): high-yield and EM bond funds 8 bps,
+# every other fund (bonds, BIL/FLOT, equity funds, gold) 3 bps. Cash is free.
+STOCK_TIERS = [(2_000, "Very liquid stock", 2), (500, "Liquid stock", 5), (0, "Less liquid stock", 10)]
+HY_EM_BOND_FUNDS = {"HYG", "EMB"}
 
 
 def last_complete_month_end() -> pd.Timestamp:
@@ -49,6 +59,28 @@ def download_daily(tickers: list[str]) -> pd.DataFrame:
     if missing:
         sys.exit(f"ERROR: no data returned for {missing}")
     return raw[tickers]
+
+
+def liquidity_and_costs(universe: pd.DataFrame, end: pd.Timestamp) -> pd.DataFrame:
+    """adv_usd_m (average daily dollar volume, $m, 12 months to `end`), liquidity_tier, tc_bps."""
+    tickers = universe.loc[universe["ticker"] != CASH_TICKER, "ticker"].tolist()
+    raw = yf.download(tickers, start=end - pd.DateOffset(months=13), end=end + pd.Timedelta(days=1),
+                      auto_adjust=False, progress=False, threads=True)
+    dollar = (raw["Close"] * raw["Volume"]).loc[end - pd.DateOffset(months=12):end]
+    adv = (dollar.mean() / 1e6).reindex(tickers)
+    if adv.isna().any() or (adv <= 0).any():
+        sys.exit(f"ERROR: no volume data for {adv.index[adv.isna() | (adv <= 0)].tolist()}")
+    out = universe[["ticker", "vehicle"]].set_index("ticker")
+    out["adv_usd_m"] = adv.round(1)
+    for t, row in out.iterrows():
+        if row["vehicle"] == "Cash":
+            tier, bps = "Cash", 0
+        elif row["vehicle"] == "ETF":
+            tier, bps = ("HY / EM bond fund", 8) if t in HY_EM_BOND_FUNDS else ("Fund", 3)
+        else:
+            tier, bps = next((name, c) for floor, name, c in STOCK_TIERS if adv[t] >= floor)
+        out.loc[t, ["liquidity_tier", "tc_bps"]] = [tier, bps]
+    return out[["adv_usd_m", "liquidity_tier", "tc_bps"]]
 
 
 def check_daily_jumps(daily: pd.DataFrame) -> None:
@@ -107,6 +139,11 @@ def main() -> None:
         "sources": {"prices": "yfinance daily auto_adjust -> month-end", "benchmarks": BENCHMARK_TICKERS,
                     "rf": f"{RF_TICKER} (3-month T-bill, % p.a.), lagged 1 month, /1200"},
     }
+    print("Computing liquidity tiers and trading costs ...")
+    costs = liquidity_and_costs(universe, end)
+    universe = universe.drop(columns=[c for c in costs.columns if c in universe.columns]).set_index("ticker")
+    universe.join(costs).reset_index().to_csv(DATA_DIR / "universe.csv", index=False)
+    meta["liquidity"] = f"average daily dollar volume, 12 months to {end.date()}"
     (DATA_DIR / "metadata.json").write_text(json.dumps(meta, indent=2))
     print(f"Saved returns {returns.shape} from {meta['first_return']} to {meta['last_month_end']}")
 

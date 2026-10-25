@@ -96,3 +96,14 @@ def test_bond_characteristics(universe):
     assert b.loc["HYG", "rating_score"] > b.loc["IGIB", "rating_score"] > b.loc["IEF", "rating_score"]  # worse = higher
     assert b["char_source"].str.startswith("https://").all() and (b["char_as_of"] >= "2026-09-30").all()
     assert universe.loc[universe["bond_type"] == "", "duration"].isna().all()
+
+
+def test_trading_cost_tiers(universe):
+    u = universe
+    stocks = u[u["vehicle"] == "Stock"]
+    assert set(stocks["tc_bps"]) == {2, 5, 10}
+    assert (stocks.loc[stocks["adv_usd_m"] >= 2000, "tc_bps"] == 2).all()
+    assert (stocks.loc[stocks["adv_usd_m"] < 500, "tc_bps"] == 10).all()
+    assert (u.loc[["HYG", "EMB"], "tc_bps"] == 8).all() and u.loc["CASH_USD", "tc_bps"] == 0
+    others = u[(u["vehicle"] == "ETF") & ~u.index.isin(["HYG", "EMB"])]
+    assert (others["tc_bps"] == 3).all() and len(others) == 17
