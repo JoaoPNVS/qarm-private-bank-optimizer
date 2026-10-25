@@ -70,6 +70,16 @@ Grading criteria (from the professor) — every feature should serve one of thes
     IGSB/IGIB replace the requested VCSH/VCIT (same segments, history from 2007-02 instead of
     2009-12). VCLT, BNDX and FLOT have no older equivalent and become eligible only in 2014-11,
     2018-06 and 2016-06;
+  - bond tags (columns of universe.csv, from `BOND_CHARACTERISTICS` in `scripts/build_universe.py`):
+    `issuer_type` (Treasury, Corporate, Municipal, Agency mortgage, EM sovereign, International),
+    `maturity_bucket` from the weighted average maturity (<1y Ultra-short, 1-5y Short, 5-10y
+    Intermediate, >=10y Long), `duration` (effective duration, years), `wam`, `credit_quality`
+    (IG / HY; HYG and EMB are HY, EMB averages BB+), `avg_rating` / `rating_score` (weighted
+    average of the fund's rating breakdown on a notch scale AAA=1 ... D=22). **Source and date in
+    `char_source` / `char_as_of`:** iShares and State Street (BIL) product pages as of 2026-10-22,
+    Vanguard product pages (VCLT, BNDX) as of 2026-09-30. Yahoo's fund data was rejected (its
+    durations are wrong, e.g. TLT 3.6y instead of ~15y). **Simplification: these CURRENT values
+    are applied to the whole backtest history**, although fund durations and ratings drift;
   - gold (GLD);
   - CASH_USD, synthetic, earning the 3-month T-bill.
 - **Risk-free**: 3-month T-bill yield `^IRX` (yfinance). Monthly rf_t = IRX_{t-1} / 1200 (rate

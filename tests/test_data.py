@@ -83,3 +83,14 @@ def test_benchmarks(returns):
 def test_missing_file_gives_clear_error(tmp_path):
     with pytest.raises(data.DataError, match="download_data.py"):
         data.load_rf(tmp_path)
+
+
+def test_bond_characteristics(universe):
+    b = universe[universe["asset_class"] == "Bond"]
+    assert b["duration"].between(0, 20).all() and (b["wam"] >= b["duration"] - 1e-9).all()
+    assert set(b.index[b["credit_quality"] == "HY"]) == {"HYG", "EMB"}
+    assert set(b["maturity_bucket"]) == {"Ultra-short", "Short", "Intermediate", "Long"}
+    assert b.loc["TLT", "duration"] > b.loc["IEF", "duration"] > b.loc["IEI", "duration"] > b.loc["SHY", "duration"]
+    assert b.loc["HYG", "rating_score"] > b.loc["IGIB", "rating_score"] > b.loc["IEF", "rating_score"]  # worse = higher
+    assert b["char_source"].str.startswith("https://").all() and (b["char_as_of"] >= "2026-09-30").all()
+    assert universe.loc[universe["asset_class"] != "Bond", "duration"].isna().all()
