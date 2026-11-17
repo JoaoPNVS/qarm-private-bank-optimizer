@@ -55,9 +55,14 @@ def block_bootstrap(history: pd.DataFrame, horizon_months: int, n_sims: int = 50
 
 
 def wealth_simulation(history: pd.DataFrame, initial_wealth: float, years: int, n_sims: int = 5000,
-                      block: int = 12, seed: int = 42) -> dict:
+                      block: int = 12, seed: int = 42, year_loss_limit: float = 0.10) -> dict:
     """For each column: wealth percentiles (5 / 50 / 95%) month by month, final-wealth percentiles
-    and the probability of ending below the initial wealth."""
+    and two risk measures for the client:
+    - prob_year_loss: share of simulated years (12-month periods) losing more than `year_loss_limit`
+      (the client's stated maximum one-year loss in the questionnaire);
+    - dd_median / dd_p5: the largest fall from a peak during the horizon (maximum drawdown) in a
+      typical scenario (median) and in a bad one (5% worst scenarios), as negative fractions.
+    prob_loss (ending below the initial wealth) is kept for reference."""
     sims = block_bootstrap(history, years * MONTHS_PER_YEAR, n_sims, block, seed)
     out = {}
     for name, r in sims.items():
@@ -65,6 +70,10 @@ def wealth_simulation(history: pd.DataFrame, initial_wealth: float, years: int, 
         paths = np.hstack([np.full((n_sims, 1), initial_wealth), paths])
         bands = pd.DataFrame(np.percentile(paths, [5, 50, 95], axis=0).T, columns=["p5", "p50", "p95"])
         final = paths[:, -1]
+        yearly = paths[:, MONTHS_PER_YEAR::MONTHS_PER_YEAR] / paths[:, :-1:MONTHS_PER_YEAR] - 1
+        max_dd = (paths / np.maximum.accumulate(paths, axis=1) - 1).min(axis=1)
         out[name] = {"bands": bands, "median": float(np.median(final)), "p5": float(np.percentile(final, 5)),
-                     "p95": float(np.percentile(final, 95)), "prob_loss": float((final < initial_wealth).mean())}
+                     "p95": float(np.percentile(final, 95)), "prob_loss": float((final < initial_wealth).mean()),
+                     "prob_year_loss": float((yearly < -year_loss_limit).mean()),
+                     "dd_median": float(np.median(max_dd)), "dd_p5": float(np.percentile(max_dd, 5))}
     return out

@@ -161,3 +161,16 @@ def test_single_constraint_infeasible(pdata):
     res = opt.solve(pdata, [vol_cap(), opt.exclusions(tickers=list(pdata.tickers))])
     assert res.status == "infeasible"
     assert res.diagnosis.conflicting == ["exclusions"]
+
+
+def test_bond_rules_not_binding_without_bonds(estimates, universe):
+    # Dynamic: no bond floor; at the default view confidence today it holds no bonds
+    from src import benchmarks as bm, profiling as prof
+    ret = data.load_returns()
+    base = est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), est.shrinkage_groups(universe),
+                        benchmarks=data.load_benchmark_returns(), benchmark_class=bm.BENCHMARK_CLASS)
+    res = opt.solve(prof.problem_data("Dynamic", est.with_view_confidence(base, 0.10), universe),
+                    prof.default_constraints("Dynamic"))
+    assert res.ok and res.weights[universe.loc[res.weights.index, "asset_class"] == "Bond"].sum() < 1e-3
+    active = set(res.duals.loc[res.duals["active"], "key"])
+    assert not active & opt.BOND_SLEEVE_KEYS and "max_volatility" in active

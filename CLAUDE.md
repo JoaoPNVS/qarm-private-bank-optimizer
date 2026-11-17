@@ -114,7 +114,18 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully
   invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
   (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
-- Expected returns: historical mean over the 60-month window, shrunk toward the grand mean of
+- **Expected returns: Black-Litterman** (`black_litterman_mu`, `with_view_confidence` in
+  `src/estimators.py`). Prior = equilibrium returns by reverse optimisation,
+  pi = delta Cov(asset, market) with market = 60% SPY / 40% AGG and delta = 2.5. Views = every
+  asset's 60-month historical mean (P = identity), Omega = diag(tau Sigma) (1 - c) / c with
+  tau = 0.05 (He & Litterman). c = "confidence in past performance", a sidebar slider 0-25%,
+  default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
+  typical asset moves about a third of the way to its historical mean, SPY most of the way.
+  Backtest 2012-2026, Balanced: Sharpe 1.15 (old method 0.97, equal weight 1.16), realised
+  volatility 11.1% for a 10% budget (old 12.7%); c = 0 keeps the budget (10.0%). Omega
+  proportional to the full tau Sigma (exact linear blend) was tested and rejected (worse). The
+  portfolio and the benchmarks (SPY, AGG) get their expected returns from the same posterior.
+- Previous method, kept for comparison and tests: historical mean over the 60-month window, shrunk toward the grand mean of
   the asset's shrinkage group: mu_i = (1 - a) m_i + a m_group, **a = 0.8**. Groups = asset
   classes, except **bonds, grouped by maturity bucket** (Short / Intermediate / Long): with 15
   segments, the whole bond class mean (-3.3% on 2021-2026, driven by long bonds in 2022) pulled
@@ -150,23 +161,29 @@ Grading criteria (from the professor) — every feature should serve one of thes
   results" box for the client.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
   fixed seed) of the client's wealth over 5-20 years, starting from the sidebar wealth. History =
-  today's portfolio weights (rebalanced monthly) applied to the months where every holding has a
-  return (limited by the youngest holding), and the profile benchmark on the SAME months; both
-  are resampled with the same blocks. Shown: median, 5% and 95% outcomes, probability of ending
-  below the initial wealth, for the portfolio and the benchmark. The simulation inherits the
-  survivorship bias (stated in the app).
+  the strategy's OUT-OF-SAMPLE backtest returns (2012-2026: each quarter's portfolio chosen with
+  the previous 60 months only, trading costs deducted) and the profile benchmark on the SAME
+  months; both are resampled with the same blocks. (Replaying today's weights on the months used
+  to choose them was in-sample: Balanced median $52m from $5m in 10 years, 0% chance of loss.)
+  Shown: median, 5% and 95% outcomes; the chance of a one-year loss above the limit the client
+  stated in the questionnaire (5 / 10 / 20 / 30%); the worst fall from a peak during the horizon,
+  typical (median) and bad case (5%); for the portfolio and the benchmark. The simulation
+  inherits the survivorship bias (stated in the app).
 
 ## App (`app.py`, six tabs)
 1. **Client Profile** — questionnaire and resulting profile, with the reasons.
 2. **Constraints** — each constraint with its toggle/slider, preset to the profile defaults;
    clear message naming the conflicting constraints when infeasible.
-3. **Portfolio** — ex-ante return / volatility / Sharpe vs benchmark and SPY, allocation by asset
+3. **Portfolio** — ex-ante return / volatility / Sharpe vs benchmark and SPY; **efficient frontier**
+   (`src/frontier.py`) with and without the client's constraints, the benchmark and SPY marked, the
+   allocation along the curve and the return the constraints cost at the client's risk; allocation by asset
    class and equity sector, holdings; **Bond portfolio** section: share of bonds, average
    duration and rating, investment-grade and high-yield shares, breakdown by issuer type,
    maturity bucket and credit quality, table of bond funds (`src/bonds.py`).
 4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
    ex-ante vs realised volatility.
-5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes and probability of loss vs benchmark.
+5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
+   stated limit and worst fall, vs benchmark.
 6. **About Us** — short project presentation and one card per team member. Team data lives in ONE
    editable file, `data/team.json` (name, role, description, photo path, LinkedIn; optional
    `repository` link). Photos go in `assets/team/`; a missing photo shows a round avatar with the
@@ -176,14 +193,14 @@ Grading criteria (from the professor) — every feature should serve one of thes
 ```
 app.py                     # Streamlit UI only — no heavy logic
 src/data.py                # loading parquet, universe tags
-src/estimators.py          # shrunk means and Ledoit-Wolf covariance, eligibility window
+src/estimators.py          # Black-Litterman (and shrunk) means, Ledoit-Wolf covariance, eligibility window
 src/optimizer.py           # cvxpy problem builder, constraint objects, infeasibility diagnosis
+src/frontier.py            # efficient frontier under the client's constraints
 src/benchmarks.py          # SPY and SPY/bond profile benchmarks, ex-ante comparison
 src/bonds.py               # bond sleeve analytics (segments, duration, rating), rating scale
 src/backtest.py            # rolling backtest engine
 src/risk.py                # performance metrics, Monte Carlo block bootstrap
 src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, default constraints
-src/report.py              # PDF report (charts drawn with matplotlib — no kaleido)
 src/team.py                # About Us: team.json loader, photo or initials avatar
 scripts/build_universe.py  # constituents snapshot -> data/universe.csv
 scripts/download_data.py   # prices, risk-free rate, benchmarks -> data/*.parquet
@@ -208,5 +225,7 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
 - Keep `requirements.txt` pinned and deployable on Streamlit Community Cloud.
 - Target **Python 3.12** (local `.venv` and Streamlit Cloud "Advanced settings"). The pinned set
   must stay free of deprecation warnings: `pytest.ini` turns DeprecationWarning/FutureWarning
-  into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), matplotlib 3.10.x
-  (pandas 2.3 plotting warns under 3.11), numpy 2.3.x (pandas 2.3 resample warns under 2.5).
+  into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), numpy 2.3.x
+  (pandas 2.3 resample warns under 2.5). matplotlib and fpdf2 were removed with the unused PDF
+  report module.
+- Theme in `.streamlit/config.toml` (navy primary color, matching the charts).

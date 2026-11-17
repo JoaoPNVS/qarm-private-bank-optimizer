@@ -161,3 +161,29 @@ def test_equal_weight_same_universe(inputs, estimates, profile):
         assert np.allclose(held[stocks], (1 - floor) / len(stocks))
         assert np.isclose(held[bonds].sum(), floor) and (not bonds or np.allclose(held[bonds], floor / len(bonds)))
     assert ew.rebalances["cost"].iloc[0] > 0 and np.isclose(ew.rebalances["turnover"].iloc[0], 1)
+
+
+# --- Black-Litterman (the app's method) ---------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def bl_estimates(inputs):
+    uni, ret, rf = inputs
+    dates = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly")
+    return btm.estimates_by_date(ret, rf, est.shrinkage_groups(uni), dates, benchmarks=data.load_benchmark_returns())
+
+
+@pytest.mark.parametrize("profile", prof.PROFILES)
+def test_black_litterman_feasible_at_every_rebalancing(inputs, bl_estimates, profile):
+    uni, ret, rf = inputs
+    res = btm.run_backtest(ret, rf, uni, prof.default_constraints(profile),
+                           estimates=btm.with_view_confidence(bl_estimates, est.DEFAULT_VIEW_CONFIDENCE))
+    assert not res.events and (res.rebalances["status"] == "ok").all()
+
+
+def test_equilibrium_keeps_the_volatility_promise(inputs, bl_estimates):
+    # documented result: with zero view confidence the realised volatility matches the 10% budget
+    uni, ret, rf = inputs
+    res = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"),
+                           estimates=btm.with_view_confidence(bl_estimates, 0.0))
+    assert res.rebalances["realised_vol"].mean() <= prof.SPECS["Balanced"].max_volatility * 1.05
+    assert btm.annual_turnover(res) < 0.6

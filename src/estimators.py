@@ -8,7 +8,32 @@ Eligibility: an asset is used at a date only if it has a complete return history
 whole estimation window (default 60 months) ending at that date. Recent IPOs therefore enter
 the optimisation 60 months after their first monthly return.
 
-Expected returns: historical mean over the window, shrunk toward the grand mean of the asset's
+Expected returns, two methods.
+
+1. BLACK-LITTERMAN (used by the app, `black_litterman_mu` / `with_view_confidence`).
+   Prior = equilibrium returns from reverse optimisation: the returns that make a reference market
+   portfolio (60% SPY / 40% AGG) optimal for an investor with risk aversion delta = 2.5,
+       pi_i = delta * Cov(r_i, r_market).
+   The prior does not look at past performance: an asset's return depends only on its risk relative
+   to the market (bonds get positive returns, a stock that rose a lot does not get more).
+   Views = the historical 60-month mean of every asset (P = identity), with uncertainty
+       Omega = diag(tau * sigma_i^2) * (1 - c) / c,   tau = 0.05,
+   where c is the "confidence in past performance" (view confidence). Posterior:
+       mu = pi + tau Sigma (tau Sigma + Omega)^-1 (m - pi).
+   Omega proportional to diag(tau Sigma) is He & Litterman's standard choice. c = 0 is the pure
+   equilibrium. For an asset uncorrelated with the others the posterior is (1 - c) pi + c m, but the
+   views are correlated and reinforce each other: at c = 10% a typical asset moves about a third of
+   the way from pi to its historical mean, and SPY most of the way. The pooling acts mainly on the
+   broad market direction (equities vs bonds), much less on picking individual winners.
+   Backtest 2012-2026 (Balanced): c = 0 keeps the 10% volatility promise (10.0% realised, 41%
+   turnover); c = 10% (default) gives the best Sharpe (1.15 vs 0.97 for method 2) with 10.7%
+   realised volatility; c = 25% adds turnover and risk without improving the Sharpe. The
+   alternative Omega proportional to the FULL tau Sigma (posterior exactly (1 - c) pi + c m for
+   every asset) was tested and rejected: any c > 0 brought back the concentration on recent winners
+   (Balanced, c = 10%: Sharpe 0.98, 11.8% realised volatility).
+
+2. SHRINKAGE toward group means (the original method, kept for comparison and tests).
+Historical mean over the window, shrunk toward the grand mean of the asset's
 shrinkage GROUP (`shrinkage_groups`):
     mu_i = (1 - a) * m_i + a * m_group(i)
 Groups are the asset classes (equities toward the average equity, cash and cash equivalents
@@ -26,7 +51,7 @@ absorb the portfolio.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -37,6 +62,11 @@ from src.data import CASH_TICKER
 MONTHS_PER_YEAR = 12
 DEFAULT_WINDOW = 60
 DEFAULT_MEAN_SHRINKAGE = 0.8
+BL_MARKET = {"SPY": 0.6, "AGG": 0.4}   # reference market portfolio of the equilibrium prior
+BL_DELTA = 2.5                          # market risk aversion (usual value in the BL literature)
+BL_TAU = 0.05                           # uncertainty of the prior, relative to Sigma
+DEFAULT_VIEW_CONFIDENCE = 0.10          # weight on past performance (the app's slider default)
+MAX_VIEW_CONFIDENCE = 0.25               # beyond, more risk and turnover and SPY overshoots its own mean
 
 
 class EstimationError(ValueError):
@@ -53,6 +83,10 @@ class Estimates:
     end: pd.Timestamp
     benchmark_mu: pd.Series | None = None     # expected excess returns of the benchmark series
     joint_cov: pd.DataFrame | None = None     # covariance of investable assets + benchmark series
+    method: str = "shrinkage"                 # "shrinkage" or "black_litterman"
+    view_confidence: float | None = None      # Black-Litterman: weight on past performance
+    prior_mu: pd.Series | None = None         # Black-Litterman equilibrium prior (assets + benchmarks)
+    sample_mu: pd.Series | None = None        # raw historical means (assets + benchmarks)
 
 
 def estimation_window(returns: pd.DataFrame, end: pd.Timestamp, months: int = DEFAULT_WINDOW,
@@ -161,4 +195,52 @@ def estimate(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
         raw = b_ex.mean() * MONTHS_PER_YEAR
         target = pd.Series({t: class_mean.get((benchmark_class or {}).get(t), raw[t]) for t in raw.index})
         out.benchmark_mu = ((1 - mean_shrinkage) * raw + mean_shrinkage * target).rename("mu")
+        out.sample_mu = (pd.concat([ex, b_ex], axis=1).mean() * MONTHS_PER_YEAR).rename("mu")
+        if CASH_TICKER in out.sample_mu:
+            out.sample_mu[CASH_TICKER] = 0.0
+        if set(BL_MARKET) <= set(b_ex.columns):
+            out.prior_mu = equilibrium_mu(out.joint_cov)
     return out
+
+
+# --- Black-Litterman --------------------------------------------------------------------------
+
+def equilibrium_mu(joint_cov: pd.DataFrame, market: dict[str, float] = BL_MARKET,
+                   delta: float = BL_DELTA) -> pd.Series:
+    """Reverse optimisation: pi_i = delta * Cov(r_i, r_market), market = weights on columns of
+    joint_cov (default 60% SPY / 40% AGG). Cash (zero covariance) gets zero."""
+    wm = pd.Series(market)
+    return (delta * joint_cov[wm.index] @ wm).rename("mu")
+
+
+def black_litterman_mu(prior: pd.Series, sample: pd.Series, cov: pd.DataFrame, confidence: float,
+                       tau: float = BL_TAU) -> pd.Series:
+    """Posterior expected returns with one absolute view per asset (its historical mean `sample`)
+    and view uncertainty Omega = diag(tau sigma_i^2) (1 - c) / c, c = `confidence`:
+        mu = pi + tau Sigma (tau Sigma + Omega)^-1 (m - pi).
+    c = 0 returns the prior; for an asset uncorrelated with the others mu = (1 - c) pi + c m (correlated
+    views reinforce each other, so their combined effect is stronger)."""
+    if not 0 <= confidence <= MAX_VIEW_CONFIDENCE:
+        raise EstimationError(f"Confidence in past performance must be between 0 and {MAX_VIEW_CONFIDENCE:.0%}.")
+    risky = [t for t in prior.index if t != CASH_TICKER and cov.at[t, t] > 0]
+    mu = prior.astype(float).copy()
+    if confidence > 0 and risky:
+        s = tau * cov.loc[risky, risky].values
+        omega = np.diag(np.diag(s) * (1 - confidence) / confidence)
+        gap = sample.reindex(risky).values - prior.reindex(risky).values
+        mu.loc[risky] = prior.reindex(risky).values + s @ np.linalg.solve(s + omega, gap)
+    if CASH_TICKER in mu:
+        mu[CASH_TICKER] = 0.0
+    return mu.rename("mu")
+
+
+def with_view_confidence(e: Estimates, confidence: float = DEFAULT_VIEW_CONFIDENCE) -> Estimates:
+    """The same window's estimates with Black-Litterman expected returns at `confidence`
+    (investable assets AND benchmark series, so the portfolio and its benchmark use the same
+    method). Covariances are unchanged; nothing is re-estimated, so changing the confidence is cheap."""
+    if e.prior_mu is None or e.joint_cov is None:
+        raise EstimationError("Black-Litterman needs estimates computed with the SPY and AGG benchmark series.")
+    post = black_litterman_mu(e.prior_mu, e.sample_mu.reindex(e.prior_mu.index), e.joint_cov, confidence)
+    bench = [t for t in post.index if t not in e.mu.index]
+    return replace(e, mu=post.reindex(e.mu.index), benchmark_mu=post.reindex(bench),
+                   method="black_litterman", view_confidence=float(confidence))

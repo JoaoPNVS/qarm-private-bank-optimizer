@@ -39,6 +39,21 @@ def test_wealth_simulation_statistics():
     assert np.allclose(b.iloc[0], 1_000_000)
 
 
+def test_questionnaire_risk_measures():
+    # 12-month blocks of a known pattern: year A = 12 x -2% (about -21.5%), year B = 12 x +3%
+    idx = pd.date_range("2000-01-31", periods=24, freq="ME")
+    hist = pd.DataFrame({"x": [-0.02] * 12 + [0.03] * 12, "flat": np.full(24, 0.001)}, index=idx)
+    out = risk.wealth_simulation(hist, 1.0, years=3, n_sims=4000, block=12, seed=0, year_loss_limit=0.10)
+    x, flat = out["x"], out["flat"]
+    # only blocks starting at month 0 are pure "A" years; a year loses more than 10% only if it is mostly A
+    yearly = np.array([np.prod(1 + hist["x"].values[s:s + 12]) - 1 for s in range(13)])
+    assert np.isclose(x["prob_year_loss"], (yearly < -0.10).mean(), atol=0.03)
+    assert flat["prob_year_loss"] == 0 and flat["dd_median"] == 0 and flat["dd_p5"] == 0
+    # worst fall: never deeper than three consecutive A years, and the bad case is at least as deep as the typical
+    assert -(1 - 0.98 ** 36) <= x["dd_p5"] <= x["dd_median"] < 0
+    assert np.isclose(x["dd_p5"], -(1 - 0.98 ** 12), atol=0.05) or x["dd_p5"] < -(1 - 0.98 ** 12)
+
+
 def test_too_short_history_is_a_clear_error():
     hist = pd.DataFrame({"a": np.zeros(20)}, index=pd.date_range("2000-01-31", periods=20, freq="ME"))
     with pytest.raises(ValueError, match="24 months"):

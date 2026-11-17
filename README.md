@@ -12,7 +12,7 @@ strategy and simulates the client's future wealth.
 |---|---|
 | Client Profile | 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
 | Constraints | every client constraint with a toggle and a slider, preset to the profile; conflicting constraints are named when the portfolio is impossible |
-| Portfolio | recommended weights, expected return / volatility / Sharpe vs the profile benchmark and SPY, allocation by asset class and sector, bond portfolio (segments, duration, rating), trading cost per asset |
+| Portfolio | recommended weights, expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints (and the return they cost), allocation by asset class and sector, bond portfolio (segments, duration, rating), trading cost per asset |
 | Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; promised vs realised volatility; allocation over time |
 | Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark |
 | About Us | the project and the team |
@@ -26,9 +26,16 @@ strategy and simulates the client's future wealth.
 - **Optimisation.** Long-only, fully invested: maximise expected return subject to
   `volatility ≤ cap` and the client constraints, minus each asset's trading cost on the trades
   (cvxpy, CLARABEL solver).
-- **Estimates** on a rolling 60-month window: historical means shrunk 80% toward the mean of the
-  asset's group (equities, gold, cash; bonds by maturity bucket) and a Ledoit-Wolf covariance
-  applied to standardised returns. An asset is used only once it has 60 months of history.
+- **Expected returns: Black-Litterman.** Prior = market-equilibrium returns from reverse
+  optimisation, `pi = delta x Cov(asset, market)` with a 60% SPY / 40% AGG market portfolio and
+  delta = 2.5. Views = each asset's 60-month average return, with He & Litterman's uncertainty
+  `Omega = diag(tau Sigma) (1 - c) / c` (tau = 0.05), where c is the "confidence in past
+  performance" set in the sidebar (default 10%, 0% = pure equilibrium). Backtest 2012–2026,
+  Balanced: Sharpe 1.15 against 0.97 with the previous method (historical means shrunk toward
+  group averages, kept in `src/estimators.py` for comparison), realised volatility 11.1% against
+  12.7% for a 10% budget, maximum drawdown −22% against −26%.
+- **Risk:** Ledoit-Wolf covariance on standardised returns over a rolling 60-month window. An
+  asset is used only once it has 60 months of history.
 - **Constraints.** Volatility cap; minimum bonds; at most 10% cash and cash equivalents; at most
   8% per stock, 15% per bond fund, 20% per other fund, 40% per equity sector; emerging markets at
   most 1/3 of equities; bond duration, investment-grade and high-yield limits by profile;
@@ -38,8 +45,10 @@ strategy and simulates the client's future wealth.
 - **Backtest.** Re-optimised every 3 (or 6 / 12) months using only past data, weights drift in
   between, costs charged on every trade. Benchmarks: SPY, a SPY / AGG mix per profile
   (30/70, 60/40, 80/20, 100/0) and an equal-weight portfolio of the same stocks and bond funds.
-- **Simulation.** 5,000 paths built from random 12-month blocks of historical monthly returns,
-  the portfolio and its benchmark on the same blocks.
+- **Simulation.** 5,000 paths built from random 12-month blocks of the strategy's out-of-sample
+  backtest returns (2012–2026, each portfolio chosen with past data only, costs deducted), the
+  benchmark on the same blocks. Risk shown as the chance of a one-year loss above the limit the
+  client stated in the questionnaire, and the worst fall from a peak (typical and 5% worst case).
 
 ## Data
 
@@ -63,7 +72,16 @@ never calls the network.
   equal-weight portfolio has the same bias, so the gap between it and the strategy is the fair
   measure of what the optimisation adds.
 - Bond fund durations and ratings are current values applied to the whole history.
-- The volatility promised by the optimiser is regularly exceeded out of sample (estimation error).
+- The volatility caps are calibrated on the full 2003–2026 history, which includes years after the
+  backtest start (2012). On the data available in January 2012 alone they would have been the same
+  (Conservative 6%, Balanced 10%) or higher (Growth 13%, Dynamic 16%, because 2003–2011 includes
+  2008), so this choice does not flatter the backtest.
+- The volatility promised by the optimiser is exceeded out of sample on average (estimation
+  error): 11.1% realised for a 10% budget at the default confidence, 10.0% with the pure
+  equilibrium (0%).
+- The optimised strategy does not clearly beat the equal-weight portfolio of the same universe
+  (Balanced Sharpe 1.15 vs 1.16); a well-known result with short estimation windows (DeMiguel,
+  Garlappi and Uppal, 2009).
 - The simulation resamples history only; its range is only as wide as the past it was built from.
 - Educational project, not investment advice.
 
@@ -93,7 +111,7 @@ choose **Python 3.12**. No secrets are needed.
 
 ```
 app.py                 Streamlit UI
-src/                   data, estimators, optimizer, benchmarks, bonds, backtest, risk, profiling, team
+src/                   data, estimators, optimizer, frontier, benchmarks, bonds, backtest, risk, profiling, team
 scripts/               one-off data download (universe snapshot, prices, costs)
 data/                  committed data files and team.json
 assets/team/           team photos

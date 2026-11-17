@@ -1,4 +1,4 @@
-﻿"""App scenarios with Streamlit's AppTest (slow: each one runs the whole app, backtest included)."""
+"""App scenarios with Streamlit's AppTest (slow: each one runs the whole app, backtest included)."""
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +53,10 @@ def backtest_metrics(at):
     return next(df.value for df in at.dataframe if "Final wealth (USD)" in df.value.columns)
 
 
+def backtest_trading(at):
+    return next(df.value for df in at.dataframe if "Turnover p.a." in df.value.columns)
+
+
 def test_backtest_benchmark_follows_the_profile():
     at = run_app()
     rows = {}
@@ -72,12 +76,27 @@ def test_backtest_benchmark_follows_the_profile():
 
 def test_app_defaults_match_the_engine_exactly():
     # untouched sliders must give the profile defaults exactly (e.g. EM <= 1/3, not 33%)
-    from src import backtest as btm, data, profiling as prof
+    from src import backtest as btm, data, estimators as est, profiling as prof
     uni, ret, rf = data.load_universe(), data.load_returns(), data.load_rf()
-    engine = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"))
+    dates = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly")
+    e = btm.estimates_by_date(ret, rf, est.shrinkage_groups(uni), dates, benchmarks=data.load_benchmark_returns())
+    engine = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"),
+                              estimates=btm.with_view_confidence(e, est.DEFAULT_VIEW_CONFIDENCE))
     at = run_app()
     app_final = backtest_metrics(at).loc["Strategy", "Final wealth (USD)"] / 5_000_000
     assert np.isclose(app_final, (1 + engine.returns).prod(), rtol=1e-10)
+
+
+def test_view_confidence_slider():
+    at = run_app()
+    r10 = metric(at, "Expected return above T-bill")
+    at.slider(key="views").set_value(0)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
+    assert metric(at, "Expected return above T-bill") != r10
+    at.slider(key="views").set_value(25)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
 
 
 def test_unexpected_error_in_a_tab_shows_a_clear_message(monkeypatch):
@@ -191,12 +210,12 @@ def test_changes_propagate_no_stale_cache():
     r0, m0 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
     at.slider(key="Balanced.stock").set_value(3)
     at.run(timeout=TIMEOUT)
-    r1, m1 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
+    r1, m1, t1 = metric(at, "Expected return above T-bill"), backtest_metrics(at), backtest_trading(at)
     assert r1 != r0 and m1.loc["Strategy", "Annual return"] != m0.loc["Strategy", "Annual return"]
     assert np.isclose(m1.iloc[2]["Annual return"], m0.iloc[2]["Annual return"])  # benchmark unaffected
     at.selectbox(key="bt.freq").set_value("Annual")
     at.run(timeout=TIMEOUT)
-    assert backtest_metrics(at).loc["Strategy", "Turnover p.a."] < m1.loc["Strategy", "Turnover p.a."]
+    assert backtest_trading(at).loc["Strategy", "Turnover p.a."] < t1.loc["Strategy", "Turnover p.a."]
     assert not at.exception and not at.error
 
 
@@ -216,28 +235,45 @@ def test_backtest_shows_equal_weight_and_how_to_read():
     at = run_app()
     m = backtest_metrics(at)
     assert list(m.index) == ["Strategy", "Equal weight (same universe)", "Benchmark (60% SPY / 40% AGG)", "SPY"]
-    assert m.loc["Equal weight (same universe)", "Turnover p.a."] > 0 and m.loc["Strategy", "Trading costs p.a."] > 0
+    t = backtest_trading(at)
+    assert list(t.index) == ["Strategy", "Equal weight (same universe)"]
+    assert t.loc["Equal weight (same universe)", "Turnover p.a."] > 0 and t.loc["Strategy", "Trading costs p.a."] > 0
     assert any("How to read these results" in md.value for md in at.markdown)
+
+
+def sim_table(at):
+    return next(df.value for df in at.dataframe if "Optimistic (95%)" in df.value.columns)
 
 
 def test_simulation_tab():
     at = run_app()
     labels = {m.label: m.value for m in at.metric}
-    assert "Median wealth in 10 years" in labels and "Probability of losing money" in labels
-    sim = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    # default answers: max one-year loss "10%"
+    assert "Median wealth in 10 years" in labels and "Chance of a loss above 10% in a year" in labels
+    assert "Worst fall within 10 years (typical)" in labels
+    sim = sim_table(at)
     assert list(sim.index) == ["Recommended portfolio", "Benchmark (60% SPY / 40% AGG)"]
     assert (sim["Pessimistic (5%)"] < sim["Median"]).all() and (sim["Median"] < sim["Optimistic (95%)"]).all()
+    assert sim["Loss above 10% in a given year"].between(0, 1).all()
+    assert (sim["Worst fall, bad case (5%)"] <= sim["Worst fall, typical"]).all() and (sim["Worst fall, typical"] < 0).all()
     at.slider(key="sim.years").set_value(20)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
     assert "Median wealth in 20 years" in {m.label for m in at.metric}
-    sim20 = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    sim20 = sim_table(at)
     at.sidebar.number_input[0].set_value(1_000_000)
     at.run(timeout=TIMEOUT)
-    sim20_1m = next(df.value for df in at.dataframe if "Probability of losing money" in df.value.columns)
+    sim20_1m = sim_table(at)
     money = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
     assert np.allclose(sim20_1m[money], sim20[money] / 5)  # same scenarios, wealth scales linearly
-    assert np.allclose(sim20_1m["Probability of losing money"], sim20["Probability of losing money"])
+    probs = ["Loss above 10% in a given year", "Worst fall, typical", "Worst fall, bad case (5%)"]
+    assert np.allclose(sim20_1m[probs].astype(float), sim20[probs].astype(float))
+
+
+def test_simulation_follows_the_stated_loss_limit():
+    at = run_app({("radio", "q.max_loss"): 0})  # "5%"
+    assert not at.exception and not at.error
+    assert "Chance of a loss above 5% in a year" in {m.label for m in at.metric}
 
 
 def about_names(at):
@@ -274,3 +310,12 @@ def test_about_us_with_a_photo(tmp_path, monkeypatch):
         assert any("LinkedIn" in md.value for md in at.markdown)
     finally:
         (team.ROOT / "assets" / "team" / "_test_photo.png").unlink()
+
+
+def test_efficient_frontier_section():
+    at = run_app()
+    assert not at.exception and not at.error
+    assert any(md.value == "### Efficient frontier" for md in at.markdown)
+    assert any("capital market line" in c.value for c in at.caption)
+    at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views"): 0})
+    assert not at.exception and not at.error

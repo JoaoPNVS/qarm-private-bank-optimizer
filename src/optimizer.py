@@ -26,6 +26,8 @@ INFEASIBLE_STATUSES = {cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE}
 ACTIVE_DUAL_TOL = 1e-6
 TOL = 1e-6
 VOL_KEY = "max_volatility"
+BOND_SLEEVE_KEYS = {"max_bond_duration", "min_investment_grade"}  # ratios within the bond sleeve
+EMPTY_SLEEVE = 1e-3  # bond share below which the sleeve is treated as empty (as in src/bonds.py)
 
 
 @dataclass
@@ -356,8 +358,14 @@ def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = Tru
     if status in OK_STATUSES:
         weights = pd.Series(np.clip(w.value, 0, None), index=data.tickers, name="weight")
         weights /= weights.sum()
+        duals = _dual_table(pairs)
+        bond_share = float(weights[data.universe["asset_class"] == "Bond"].sum())
+        if bond_share < EMPTY_SLEEVE:
+            # without bonds the ratio constraints read 0 <= 0: the solver may return a non-zero
+            # multiplier at that degenerate point, but no bond rule limits a portfolio with no bonds
+            duals.loc[duals["key"].isin(BOND_SLEEVE_KEYS), ["shadow_price", "bps_per_pp", "active"]] = [0.0, 0.0, False]
         return OptimizationResult(status, weights, **portfolio_stats(weights, data),
-                                  duals=_dual_table(pairs), message="Optimal portfolio found.")
+                                  duals=duals, message="Optimal portfolio found.")
     if status in INFEASIBLE_STATUSES:
         diag = diagnose_infeasibility(data, constraints) if diagnose else None
         return OptimizationResult(cp.INFEASIBLE, diagnosis=diag,
