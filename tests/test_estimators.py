@@ -79,3 +79,59 @@ def test_window_errors():
         est.estimation_window(ret, pd.Timestamp("1996-06-30"), 60)
     with pytest.raises(est.EstimationError, match="Shrinkage"):
         est.shrunk_mean(ret.iloc[-60:].fillna(0), est.shrinkage_groups(data.load_universe()), 1.5)
+
+
+# --- Black-Litterman -----------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def bl_base(window, universe):
+    from src import benchmarks as bm
+    return est.estimate(*window, est.shrinkage_groups(universe), benchmarks=data.load_benchmark_returns(),
+                        benchmark_class=bm.BENCHMARK_CLASS)
+
+
+def test_equilibrium_prior_is_reverse_optimisation(bl_base):
+    jc, pi = bl_base.joint_cov, bl_base.prior_mu
+    expected = est.BL_DELTA * (0.6 * jc["SPY"] + 0.4 * jc["AGG"])
+    assert np.allclose(pi, expected.reindex(pi.index))
+    assert pi[data.CASH_TICKER] == 0
+    bonds = data.load_universe().query("asset_class == 'Bond'").index.intersection(pi.index)
+    assert (pi[bonds] > 0).all()                       # bonds earn a premium in equilibrium...
+    assert (bl_base.sample_mu[bonds] < 0).all()        # ...although they lost to cash over the window
+
+
+def test_zero_confidence_gives_the_prior(bl_base):
+    e = est.with_view_confidence(bl_base, 0.0)
+    assert np.allclose(e.mu, bl_base.prior_mu.reindex(e.mu.index))
+    assert np.allclose(e.benchmark_mu, bl_base.prior_mu[["SPY", "AGG"]])
+    assert e.method == "black_litterman" and e.view_confidence == 0.0
+    assert e.cov is bl_base.cov and e.joint_cov is bl_base.joint_cov   # nothing re-estimated
+
+
+def test_uncorrelated_assets_blend_linearly():
+    idx = ["A", "B", data.CASH_TICKER]
+    cov = pd.DataFrame(np.diag([0.04, 0.01, 0.0]), index=idx, columns=idx)
+    prior, sample = pd.Series([0.05, 0.02, 0.0], index=idx), pd.Series([0.20, -0.04, 0.0], index=idx)
+    for c in (0.1, 0.25):
+        mu = est.black_litterman_mu(prior, sample, cov, c)
+        assert np.allclose(mu, (1 - c) * prior + c * sample)
+
+
+def test_correlated_views_reinforce_each_other(bl_base):
+    c = 0.10
+    post = est.with_view_confidence(bl_base, c)
+    spy = (post.benchmark_mu["SPY"] - bl_base.prior_mu["SPY"]) / (bl_base.sample_mu["SPY"] - bl_base.prior_mu["SPY"])
+    assert spy > 3 * c              # far more than the 10% an isolated view would get
+
+
+def test_more_confidence_moves_toward_history(bl_base):
+    gap = lambda c: (est.with_view_confidence(bl_base, c).mu - bl_base.sample_mu.reindex(bl_base.mu.index)).abs().mean()
+    assert gap(0.0) > gap(0.10) > gap(0.25)
+
+
+def test_black_litterman_errors(window, universe, bl_base):
+    plain = est.estimate(*window, est.shrinkage_groups(universe))
+    with pytest.raises(est.EstimationError, match="benchmark"):
+        est.with_view_confidence(plain, 0.1)
+    with pytest.raises(est.EstimationError, match="between 0 and"):
+        est.with_view_confidence(bl_base, est.MAX_VIEW_CONFIDENCE + 0.05)

@@ -73,3 +73,14 @@ def test_risk_and_return_increase_with_profile(universe, estimates):
     res = [opt.solve(prof.problem_data(p, estimates, universe), prof.default_constraints(p)) for p in prof.PROFILES]
     vols, rets = [r.volatility for r in res], [r.expected_return for r in res]
     assert vols == sorted(vols) and rets == sorted(rets)
+
+
+@pytest.mark.parametrize("profile", prof.PROFILES)
+def test_default_portfolio_feasible_with_black_litterman(profile, universe):
+    ret = data.load_returns()
+    base = est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(), est.shrinkage_groups(universe),
+                        benchmarks=data.load_benchmark_returns())
+    for c in (0.0, est.DEFAULT_VIEW_CONFIDENCE, est.MAX_VIEW_CONFIDENCE):
+        d = prof.problem_data(profile, est.with_view_confidence(base, c), universe)
+        res = opt.solve(d, prof.default_constraints(profile))
+        assert res.ok and all(satisfied(k, res.weights, d) for k in prof.default_constraints(profile)), (profile, c)
