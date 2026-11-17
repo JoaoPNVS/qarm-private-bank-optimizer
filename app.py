@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, optimizer as opt, profiling as prof, risk, team
+from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, frontier as fr, optimizer as opt, profiling as prof, risk, team
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide")
 
@@ -55,8 +55,10 @@ def bench_label(profile: str) -> str:
 
 
 def fig_layout(fig, height=380):
-    fig.update_layout(template="plotly_white", height=height, margin=dict(l=10, r=10, t=40, b=10),
-                      legend=dict(orientation="h", y=1.08, x=0), font=dict(size=13))
+    # legend below the plot: above it, it collided with the title and wrapped over narrow charts
+    fig.update_layout(template="plotly_white", height=height, margin=dict(l=10, r=10, t=50, b=10),
+                      legend=dict(orientation="h", yanchor="top", y=-0.15, x=0, xanchor="left"),
+                      font=dict(size=13), title=dict(x=0, xanchor="left"))
     return fig
 
 
@@ -81,8 +83,8 @@ def build_constraints(profile: str, spec: dict) -> list[opt.Constraint]:
 
 
 @st.cache_data(show_spinner="Optimising the portfolio...")
-def optimise(profile: str, cons_json: str):
-    e = get_estimates()
+def optimise(profile: str, cons_json: str, confidence: float):
+    e = est.with_view_confidence(get_estimates(), confidence)
     d = prof.problem_data(profile, e, load_data()[0])
     res = opt.solve(d, build_constraints(profile, json.loads(cons_json)))
     eq = prof.SPECS[profile].benchmark_equity
@@ -93,16 +95,16 @@ def optimise(profile: str, cons_json: str):
 @st.cache_data(show_spinner=False)
 def backtest_estimates() -> dict:
     """Estimates at every quarter-end of the backtest (semi-annual/annual dates are a subset)."""
-    universe, returns, rf, _ = load_data()
+    universe, returns, rf, bench = load_data()
     dates = btm.rebalance_dates(returns.index, btm.DEFAULT_START, "Quarterly")
-    return btm.estimates_by_date(returns, rf, est.shrinkage_groups(universe), dates)
+    return btm.estimates_by_date(returns, rf, est.shrinkage_groups(universe), dates, benchmarks=bench)
 
 
 @st.cache_data(show_spinner="Running the backtest (re-optimising at every rebalancing)...")
-def run_backtest(profile: str, cons_json: str, freq: str):
+def run_backtest(profile: str, cons_json: str, freq: str, confidence: float):
     universe, returns, rf, bench = load_data()
     res = btm.run_backtest(returns, rf, universe, build_constraints(profile, json.loads(cons_json)),
-                           freq=freq, estimates=backtest_estimates())
+                           freq=freq, estimates=btm.with_view_confidence(backtest_estimates(), confidence))
     ew = btm.run_equal_weight(returns, universe, prof.SPECS[profile].min_bonds, freq=freq)
     idx = res.returns.index
     series = pd.DataFrame({"Strategy": res.returns, EW_LABEL: ew.returns.reindex(idx),
@@ -112,17 +114,27 @@ def run_backtest(profile: str, cons_json: str, freq: str):
     return res, ew, series
 
 
+@st.cache_data(show_spinner="Computing the efficient frontier...")
+def frontiers(profile: str, cons_json: str, confidence: float):
+    """Efficient frontier with the client's constraints and without them (long-only only)."""
+    e = est.with_view_confidence(get_estimates(), confidence)
+    d = prof.problem_data(profile, e, load_data()[0])
+    top = max(0.25, 1.6 * prof.SPECS[profile].max_volatility)
+    cons = build_constraints(profile, json.loads(cons_json))
+    return fr.efficient_frontier(d, cons, max_vol=top), fr.efficient_frontier(d, [], max_vol=top)
+
+
 @st.cache_data(show_spinner="Simulating 5,000 wealth paths...")
-def simulate(profile: str, cons_json: str, years: int, wealth: float):
-    """Block bootstrap of today's portfolio and of the profile benchmark on the same historical months."""
-    universe, returns, rf, bench = load_data()
-    res = optimise(profile, cons_json)[0]
-    if not res.ok:
-        raise ValueError(res.message)
-    hist = pd.concat([risk.portfolio_history(res.weights, returns),
-                      bm.profile_benchmark_returns(prof.SPECS[profile].benchmark_equity, bench)], axis=1).dropna()
+def simulate(profile: str, cons_json: str, freq: str, confidence: float, years: int, wealth: float,
+             loss_limit: float):
+    """Block bootstrap of the strategy's OUT-OF-SAMPLE backtest returns (at every date the portfolio
+    was chosen with past data only, net of trading costs) and of the profile benchmark on the same
+    months. Replaying today's weights on the months used to choose them would be in-sample (look-ahead)."""
+    _, series = run_backtest(profile, cons_json, freq, confidence)[1:]
+    hist = series[["Strategy", bench_label(profile)]].dropna()
     hist.columns = ["Portfolio", "Benchmark"]
-    return risk.wealth_simulation(hist, wealth, years), hist.index[0], hist.index[-1], len(hist)
+    sim = risk.wealth_simulation(hist, wealth, years, year_loss_limit=loss_limit)
+    return sim, hist.index[0], hist.index[-1], len(hist)
 
 
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
@@ -177,6 +189,15 @@ with st.sidebar:
                 f"**{spec_p.min_bonds:.0%}** · benchmark **{spec_p.benchmark_equity:.0%} SPY / "
                 f"{1 - spec_p.benchmark_equity:.0%} AGG**")
     st.divider()
+    confidence = st.slider(
+        "Confidence in past performance", 0, int(est.MAX_VIEW_CONFIDENCE * 100),
+        int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
+        help="Black-Litterman. Expected returns start from the market equilibrium: each asset's return "
+             "reflects only its risk relative to a 60% SPY / 40% AGG market portfolio. Each asset's average "
+             f"return over the last {WINDOW} months is then added as a view, with this confidence. Because "
+             "assets move together, the views reinforce each other, so even 10% tilts the portfolio noticeably. "
+             "0% = pure equilibrium: most diversified, closest to the promised risk. Higher = more weight on "
+             "recent trends, with more risk and trading.") / 100
     st.caption(f"Data: monthly total returns in USD up to {returns.index[-1]:%B %Y} (yfinance). "
                f"Estimates use the last {WINDOW} months. Risk-free: 3-month T-bill, currently "
                f"{rf.iloc[-1] * 12:.2%} p.a.")
@@ -200,10 +221,10 @@ with tabs[0], guarded("Client Profile"):
             st.markdown(f"## {a.profile}")
             st.caption(sp.description)
             c1, c2, c3 = st.columns(3)
-            c1.metric("Risk capacity", f"{a.dimensions['capacity']:.2f} / 4", a.levels["capacity"], delta_color="off")
-            c2.metric("Risk willingness", f"{a.dimensions['willingness']:.2f} / 4", a.levels["willingness"],
+            c1.metric("Capacity (1-4)", f"{a.dimensions['capacity']:.2f}", a.levels["capacity"], delta_color="off")
+            c2.metric("Willingness (1-4)", f"{a.dimensions['willingness']:.2f}", a.levels["willingness"],
                       delta_color="off")
-            c3.metric("Knowledge", f"{a.dimensions['knowledge']:.0f} / 4")
+            c3.metric("Knowledge (1-4)", f"{a.dimensions['knowledge']:.0f}")
             st.markdown("**Why this profile**")
             for r in a.reasons:
                 st.markdown(f"- {r}")
@@ -283,7 +304,7 @@ with tabs[1], guarded("Constraints"):
 
 cons_json = json.dumps(cons_spec, sort_keys=True)
 try:
-    res, bench_stats, spy_stats, te = optimise(profile, cons_json)
+    res, bench_stats, spy_stats, te = optimise(profile, cons_json, confidence)
 except EXPECTED_ERRORS as exc:
     st.error(f"The portfolio could not be computed: {exc}")
     st.stop()
@@ -320,9 +341,56 @@ with tabs[2], guarded("Portfolio"):
                             index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
         st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
                      .format("{:.2f}", subset=pd.IndexSlice[["Sharpe ratio"], :]), width="stretch")
-        st.caption(f"Ex-ante figures estimated on the last {WINDOW} months: historical means shrunk 80% toward "
-                   "their asset-class average, Ledoit-Wolf covariance. Past winners still dominate the estimates; "
-                   "see the Backtest tab for what such portfolios actually delivered.")
+        st.caption(f"Ex-ante figures, estimated on the last {WINDOW} months. Expected returns: Black-Litterman, i.e. "
+                   "market-equilibrium returns (implied by a 60% SPY / 40% AGG market portfolio) combined with each "
+                   f"asset's recent average return as a view, at {confidence:.0%} confidence (sidebar). Risk: Ledoit-Wolf "
+                   "covariance. The portfolio and its benchmarks are estimated with the same method; see the "
+                   "Backtest tab for what this strategy actually delivered.")
+
+        st.markdown("### Efficient frontier")
+        try:
+            front, free = frontiers(profile, cons_json, confidence)
+        except EXPECTED_ERRORS as exc:
+            st.error(f"The efficient frontier could not be computed: {exc}")
+            front = None
+        if front is not None:
+            cap = cons_spec["max_volatility"]["params"]["limit"]
+            free_at_cap = float(np.interp(res.volatility, free["volatility"], free["expected_return"]))
+            cost_bps = max(free_at_cap - res.expected_return, 0.0) * 1e4
+            f1, f2 = st.columns([3, 2], gap="large")
+            f = go.Figure([
+                go.Scatter(x=free["volatility"] * 100, y=free["expected_return"] * 100, name="Without client constraints",
+                           line=dict(color=GREY, width=2, dash="dash")),
+                go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
+                           name="With your constraints", line=dict(color=NAVY, width=3)),
+                go.Scatter(x=[bench_stats["volatility"] * 100], y=[bench_stats["expected_return"] * 100],
+                           name=bench_label(profile), mode="markers",
+                           marker=dict(color=GREY, size=13, symbol="diamond", line=dict(color="white", width=1))),
+                go.Scatter(x=[spy_stats["volatility"] * 100], y=[spy_stats["expected_return"] * 100], name="SPY",
+                           mode="markers", marker=dict(color=ACCENT, size=12, line=dict(color="white", width=1))),
+                go.Scatter(x=[res.volatility * 100], y=[res.expected_return * 100], name="Recommended portfolio",
+                           mode="markers", marker=dict(color=NAVY, size=18, symbol="star", line=dict(color="white", width=1)))])
+            f.add_vline(x=cap * 100, line=dict(color=NAVY, width=1, dash="dot"),
+                        annotation_text=f"Risk budget {cap:.0%}", annotation_position="top left")
+            f.update_layout(title="Best expected return for each level of risk", xaxis_title="Expected volatility (% p.a.)",
+                            yaxis_title="Expected return above T-bill (% p.a.)")
+            f1.plotly_chart(fig_layout(f, 430), width="stretch")
+            mix = front.set_index("volatility")[fr.CLASS_ORDER].rename(columns=CLASS_LABELS) * 100
+            g = go.Figure([go.Scatter(x=mix.index * 100, y=mix[c], name=c, stackgroup="one", mode="none", fillcolor=clr)
+                           for c, clr in zip(mix.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+            g.add_vline(x=cap * 100, line=dict(color="white", width=2, dash="dot"))
+            g.update_layout(title="Allocation along the frontier", xaxis_title="Expected volatility (% p.a.)",
+                            yaxis_title="% of portfolio", yaxis_range=[0, 100])
+            f2.plotly_chart(fig_layout(g, 430), width="stretch")
+            st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
+                       f"risk. The recommended portfolio (star) is the point at the risk budget. At this risk, "
+                       f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
+                       "year: that is what diversification limits, the bond floor and the other rules cost on these "
+                       "estimates, in exchange for a sturdier portfolio. Without constraints the curve starts at cash "
+                       "(zero risk) and is almost a straight line: mixing cash with the best risky portfolio, as on "
+                       "the capital market line. The benchmark and SPY sit below the curve: "
+                       "for the same estimated risk, an optimised mix of the universe expects more (before "
+                       "estimation error; see the Backtest tab).")
 
         b_eq = spec_p.benchmark_equity
         by_class = pd.DataFrame({"Portfolio": w.groupby(uni["asset_class"]).sum(),
@@ -400,7 +468,7 @@ with tabs[3], guarded("Backtest"):
     c1, _ = st.columns([1, 3])
     freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
     try:
-        bt, ew, series = run_backtest(profile, cons_json, freq)
+        bt, ew, series = run_backtest(profile, cons_json, freq, confidence)
     except EXPECTED_ERRORS as exc:
         st.error(f"The backtest could not run: {exc}")
         bt = None
@@ -422,16 +490,23 @@ with tabs[3], guarded("Backtest"):
             st.warning(ev)
         metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
         metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
-        metrics["Turnover p.a."] = [btm.annual_turnover(bt), btm.annual_turnover(ew), np.nan, np.nan]
-        metrics["Trading costs p.a."] = [btm.annual_cost(bt), btm.annual_cost(ew), np.nan, np.nan]
         st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
                                              "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
             {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
-             "Final wealth (USD)": lambda x: usd(x), "Turnover p.a.": lambda x: "" if pd.isna(x) else f"{x:.0%}",
-             "Trading costs p.a.": lambda x: "" if pd.isna(x) else f"{x * 1e4:.1f} bps"}),
+             "Final wealth (USD)": lambda x: usd(x)}),
             width="stretch")
         if spec_p.benchmark_equity >= 1:
             st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")
+        # separate table: turnover and costs only exist for the two portfolios we trade (an empty
+        # cell for the index benchmarks would show as "None")
+        trading = pd.DataFrame({"Turnover p.a.": [btm.annual_turnover(bt), btm.annual_turnover(ew)],
+                                "Trading costs p.a.": [btm.annual_cost(bt), btm.annual_cost(ew)]},
+                               index=["Strategy", EW_LABEL])
+        t1, _ = st.columns([2, 3])
+        t1.dataframe(trading.style.format({"Turnover p.a.": "{:.0%}",
+                                           "Trading costs p.a.": lambda x: f"{x * 1e4:.1f} bps"}), width="stretch")
+        t1.caption("Turnover = buys + sells per year as a share of the portfolio (initial purchase excluded); "
+                   "trading costs include the initial purchase.")
 
         growth = wealth * (1 + series).cumprod()
         styles = (("Strategy", NAVY, 3, "solid"), (EW_LABEL, "#7f9cb8", 2, "dash"), (bench_label(profile), GREY, 2, "solid"),
@@ -469,14 +544,19 @@ with tabs[4], guarded("Simulation"):
     st.subheader(f"Wealth simulation — {profile} profile, starting with {usd(wealth)}")
     if require_ok(res):
         years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")
+        loss_limit = prof.MAX_LOSS_LEVELS[answers["max_loss"]]
         try:
-            sim, h_start, h_end, n_hist = simulate(profile, cons_json, years, float(wealth))
+            sim, h_start, h_end, n_hist = simulate(profile, cons_json, st.session_state.get("bt.freq", "Quarterly"),
+                                                   confidence, years, float(wealth), loss_limit)
         except EXPECTED_ERRORS as exc:
             st.error(f"The simulation could not run: {exc}")
             sim = None
         if sim is not None:
+            year_col = f"Loss above {loss_limit:.0%} in a given year"
+            dd_col, dd_bad_col = "Worst fall, typical", "Worst fall, bad case (5%)"
             rows = {name: {"Median": v["median"], "Pessimistic (5%)": v["p5"], "Optimistic (95%)": v["p95"],
-                           "Probability of losing money": v["prob_loss"]} for name, v in sim.items()}
+                           year_col: v["prob_year_loss"], dd_col: v["dd_median"], dd_bad_col: v["dd_p5"]}
+                    for name, v in sim.items()}
             table = pd.DataFrame(rows).T.rename(index={"Portfolio": "Recommended portfolio",
                                                        "Benchmark": bench_label(profile)})
             p_, b_ = sim["Portfolio"], sim["Benchmark"]
@@ -484,12 +564,27 @@ with tabs[4], guarded("Simulation"):
             c[0].metric(f"Median wealth in {years} years", usd(p_["median"]),
                         f"{usd(p_['median'] - b_['median'])} vs benchmark")
             c[1].metric("Pessimistic scenario (5%)", usd(p_["p5"]))
-            c[2].metric("Optimistic scenario (95%)", usd(p_["p95"]))
-            c[3].metric("Probability of losing money", pct(p_["prob_loss"]),
-                        f"{(p_['prob_loss'] - b_['prob_loss']) * 100:+.1f} pp vs benchmark", delta_color="inverse")
+            def vs_bench(diff_pp: float, digits: int, color: str) -> dict:
+                """Delta text and color; a difference that rounds to zero is shown neutrally."""
+                if round(diff_pp, digits) == 0:
+                    return {"delta": "same as benchmark", "delta_color": "off"}
+                return {"delta": f"{diff_pp:+.{digits}f} pp vs benchmark", "delta_color": color}
+
+            c[2].metric(f"Chance of a loss above {loss_limit:.0%} in a year", pct(p_["prob_year_loss"]),
+                        **vs_bench((p_["prob_year_loss"] - b_["prob_year_loss"]) * 100, 1, "inverse"),
+                        help=f"Your answer in the questionnaire: a one-year loss of at most {loss_limit:.0%}. "
+                             "Share of simulated years that lose more than that.")
+            c[3].metric(f"Worst fall within {years} years (typical)", pct(p_["dd_median"], 0),
+                        **vs_bench((p_["dd_median"] - b_["dd_median"]) * 100, 0, "normal"),
+                        help=f"Largest fall from a previous peak during the {years} years, in a typical scenario "
+                             f"(median). In a bad scenario (5% worst): {pct(p_['dd_p5'], 0)}.")
             st.dataframe(table.style.format({"Median": lambda x: usd(x), "Pessimistic (5%)": lambda x: usd(x),
-                                             "Optimistic (95%)": lambda x: usd(x),
-                                             "Probability of losing money": "{:.1%}"}), width="stretch")
+                                             "Optimistic (95%)": lambda x: usd(x), year_col: "{:.1%}",
+                                             dd_col: "{:.0%}", dd_bad_col: "{:.0%}"}), width="stretch")
+            st.caption(f"Loss in a given year: share of simulated years losing more than {loss_limit:.0%}, the "
+                       "largest one-year loss you said you could accept in the questionnaire. Worst fall: the "
+                       "largest drop from a previous peak during the horizon, in a typical scenario and in the "
+                       "5% worst scenarios.")
             f = go.Figure()
             for name, clr, fill in (("Benchmark", GREY, "rgba(163,173,184,0.25)"), ("Portfolio", NAVY, "rgba(31,59,87,0.20)")):
                 b = sim[name]["bands"]
@@ -502,12 +597,13 @@ with tabs[4], guarded("Simulation"):
             f.update_layout(xaxis_title="Years", yaxis_title="Wealth (USD)", yaxis_type="log",
                             title="Range of possible outcomes")
             st.plotly_chart(fig_layout(f, 460), width="stretch")
-            st.caption(f"5,000 scenarios built by drawing random 12-month blocks of the actual monthly returns of "
-                       f"today's portfolio (weights kept constant) and of its benchmark, on the same months: "
-                       f"{h_start:%B %Y} – {h_end:%B %Y} ({n_hist / 12:.1f} years of history, limited by the "
-                       "youngest holding). Fees and taxes are ignored. "
-                       "The simulation inherits the survivorship bias of the stock list (today's winners, picked "
-                       "with hindsight), so the portfolio's outcomes are optimistic; the benchmark's are not.")
+            st.caption(f"5,000 scenarios built by drawing random 12-month blocks of the strategy's backtest returns "
+                       f"and of its benchmark, on the same months: {h_start:%B %Y} – {h_end:%B %Y} "
+                       f"({n_hist / 12:.1f} years). These returns are out of sample: at every rebalancing the "
+                       "portfolio was chosen using only data available at that date, and trading costs are "
+                       "deducted. Management fees and taxes are ignored. The simulation still inherits the "
+                       "survivorship bias of the stock list (today's winners, picked with hindsight), so the "
+                       "portfolio's outcomes are somewhat optimistic; the benchmark's are not.")
 
 # --- About Us --------------------------------------------------------------------------------
 
