@@ -64,10 +64,19 @@ def rebalance_dates(index: pd.DatetimeIndex, start: pd.Timestamp, freq: str) -> 
 
 def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
                       dates: list[pd.Timestamp], window: int = est.DEFAULT_WINDOW,
-                      mean_shrinkage: float = est.DEFAULT_MEAN_SHRINKAGE) -> dict:
-    """Estimates at each date (independent of the client, so they can be shared across profiles)."""
-    return {d: est.estimate(est.estimation_window(returns, d, window), rf, groups, mean_shrinkage)
+                      mean_shrinkage: float = est.DEFAULT_MEAN_SHRINKAGE,
+                      benchmarks: pd.DataFrame | None = None) -> dict:
+    """Estimates at each date (independent of the client, so they can be shared across profiles).
+    With `benchmarks` (SPY, AGG) they also carry the Black-Litterman prior; apply a confidence with
+    `with_view_confidence`."""
+    return {d: est.estimate(est.estimation_window(returns, d, window), rf, groups, mean_shrinkage,
+                            benchmarks=benchmarks)
             for d in dates}
+
+
+def with_view_confidence(estimates: dict, confidence: float) -> dict:
+    """Black-Litterman expected returns at every date (cheap: covariances are reused)."""
+    return {d: est.with_view_confidence(e, confidence) for d, e in estimates.items()}
 
 
 def _simulate(returns: pd.DataFrame, universe: pd.DataFrame, rebals: list[pd.Timestamp], tc: pd.Series,

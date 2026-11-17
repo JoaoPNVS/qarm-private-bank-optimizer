@@ -8,7 +8,9 @@ starts in 1998-02.
 Volatility caps are calibrated on these benchmarks: historical benchmark volatility rounded UP
 to the next full percent, so the optimised portfolio takes the same risk as its benchmark.
 Measured on USD data 2003-10 to 2026-09: 5.91% / 9.28% / 11.85% / 14.52%, hence caps
-6 / 10 / 12 / 15% (tested in tests/test_benchmarks.py).
+6 / 10 / 12 / 15% (tested in tests/test_benchmarks.py). Look-ahead check: on the data available at
+the backtest start (2003-10 to 2012-01) the same rule gives 6 / 10 / 13 / 16% (2008 inflates the
+early volatility), so the full-history caps are equal or TIGHTER and do not flatter the backtest.
 """
 from __future__ import annotations
 

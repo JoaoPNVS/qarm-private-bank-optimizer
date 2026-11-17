@@ -37,6 +37,7 @@ PROFILES = ["Conservative", "Balanced", "Growth", "Dynamic"]
 LEVEL_CUTOFFS = [1.75, 2.50, 3.25]
 KNOWLEDGE_CAP = {1: "Balanced", 2: "Growth"}
 SHORT_HORIZON_ANSWER = 0  # option index of "less than 3 years"
+MAX_LOSS_LEVELS = (0.05, 0.10, 0.20, 0.30)  # one-year loss accepted, per answer to "max_loss"
 
 
 @dataclass(frozen=True)
