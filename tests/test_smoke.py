@@ -242,7 +242,9 @@ def test_backtest_shows_equal_weight_and_how_to_read():
 
 
 def sim_table(at):
-    return next(df.value for df in at.dataframe if "Optimistic (95%)" in df.value.columns)
+    """The simulation's two tables (wealth, then risk measures) joined by row."""
+    money = next(df.value for df in at.dataframe if "Optimistic (95%)" in df.value.columns)
+    return money.join(next(df.value for df in at.dataframe if "1-year VaR (95%)" in df.value.columns))
 
 
 def test_simulation_tab():
@@ -256,6 +258,8 @@ def test_simulation_tab():
     assert (sim["Pessimistic (5%)"] < sim["Median"]).all() and (sim["Median"] < sim["Optimistic (95%)"]).all()
     assert sim["Loss above 10% in a given year"].between(0, 1).all()
     assert (sim["Worst fall, bad case (5%)"] <= sim["Worst fall, typical"]).all() and (sim["Worst fall, typical"] < 0).all()
+    assert (sim["1-year expected shortfall (95%)"] <= sim["1-year VaR (95%)"]).all()
+    assert "Average of the worst 5% of years" in labels
     at.slider(key="sim.years").set_value(20)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
@@ -266,7 +270,8 @@ def test_simulation_tab():
     sim20_1m = sim_table(at)
     money = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
     assert np.allclose(sim20_1m[money], sim20[money] / 5)  # same scenarios, wealth scales linearly
-    probs = ["Loss above 10% in a given year", "Worst fall, typical", "Worst fall, bad case (5%)"]
+    probs = ["Loss above 10% in a given year", "Worst fall, typical", "Worst fall, bad case (5%)",
+             "1-year VaR (95%)", "1-year expected shortfall (95%)"]
     assert np.allclose(sim20_1m[probs].astype(float), sim20[probs].astype(float))
 
 
@@ -317,5 +322,20 @@ def test_efficient_frontier_section():
     assert not at.exception and not at.error
     assert any(md.value == "### Efficient frontier" for md in at.markdown)
     assert any("capital market line" in c.value for c in at.caption)
+    assert any("maximum-Sharpe (tangency) portfolio" in c.value for c in at.caption)
     at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views"): 0})
     assert not at.exception and not at.error
+
+
+def test_risk_contributions_section():
+    at = run_app()
+    assert not at.exception and not at.error
+    assert any(md.value == "### Where the risk comes from" for md in at.markdown)
+    labels = {m.label: m.value for m in at.metric}
+    assert {"Effective number of positions", "Effective number (entropy)", "Gini coefficient",
+            "Diversification ratio", "Risk from the top 10"} <= set(labels)
+    assert float(labels["Diversification ratio"]) > 1
+    assert any("Euler's theorem" in c.value for c in at.caption)
+    at = run_app({("selectbox", "profile"): "Dynamic"})    # benchmark = 100% SPY, no bonds held
+    assert not at.exception and not at.error
+    assert any("SPY carries 100% of the risk" in c.value for c in at.caption)

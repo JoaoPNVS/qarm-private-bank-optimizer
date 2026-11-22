@@ -13,7 +13,7 @@ Mapping, kept deliberately simple so it can be explained to the client:
 3. knowledge caps the profile: "none" -> at most Balanced, "basic" -> at most Growth;
 4. knock-out: a horizon below 3 years always gives Conservative.
 
-Risk budget: each profile has a maximum expected volatility; the optimiser maximises expected
+Volatility budget: each profile has a maximum expected volatility; the optimiser maximises expected
 return under that cap (src/optimizer.py), and a benchmark mixing SPY and US aggregate bonds
 (src/benchmarks.py). Each profile also sets a floor on bond funds (cash does not count) equal
 to its benchmark's bond share (70 / 40 / 20 / 0%), active by default. The other default
@@ -115,7 +115,7 @@ def assess(answers: dict[str, int]) -> Assessment:
 class ProfileSpec:
     name: str
     description: str
-    max_volatility: float      # risk budget (annualised, ex ante), calibrated on the benchmark
+    max_volatility: float      # volatility budget (annualised, ex ante), calibrated on the benchmark
     benchmark_equity: float    # SPY share of the profile benchmark, the rest in AGG
     max_bond_duration: float   # years, average of the bond sleeve (AGG is about 6)
     min_investment_grade: float  # share of the bond sleeve

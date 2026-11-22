@@ -39,7 +39,7 @@ def test_volatility_cap_is_mandatory(pdata):
 def test_max_return_hits_the_volatility_cap(pdata, limit):
     res = opt.solve(pdata, [vol_cap(limit)])
     assert res.ok
-    assert np.isclose(res.volatility, limit, atol=1e-4)  # the risk budget is fully used
+    assert np.isclose(res.volatility, limit, atol=1e-4)  # the volatility budget is fully used
     assert np.isclose(res.weights.sum(), 1) and (res.weights >= 0).all()
 
 
@@ -83,7 +83,7 @@ def test_each_constraint_respected_and_binding(pdata):
 def test_max_cash(pdata, universe):
     cash = universe["asset_class"] == "Cash"
     free = opt.solve(pdata, [vol_cap(0.02)]).weights.reindex(universe.index).fillna(0)
-    assert free[cash].sum() > 0.2  # a low risk budget pushes the free solution into cash
+    assert free[cash].sum() > 0.2  # a low volatility budget pushes the free solution into cash
     c = opt.max_cash(0.10)
     res = opt.solve(pdata, [vol_cap(0.02), c])
     assert res.ok and satisfied(c, res.weights, pdata) and satisfied(vol_cap(0.02), res.weights, pdata)
