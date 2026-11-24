@@ -1,11 +1,12 @@
 """Load parquet data and universe tags (everything in USD, no currency conversion).
 
-All files are produced once by scripts/build_universe.py and scripts/download_data.py; nothing
-here touches the network. Every loader raises DataError with a message that the app can show
+All files are produced once by scripts/build_universe.py, scripts/download_data.py and
+scripts/download_insiders.py (SEC Form 4); nothing here touches the network. Every loader raises DataError with a message that the app can show
 to the user as-is.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -26,10 +27,10 @@ class DataError(RuntimeError):
     """Missing or inconsistent data file."""
 
 
-def _read_parquet(name: str, data_dir: Path) -> pd.DataFrame:
+def _read_parquet(name: str, data_dir: Path, script: str = "download_data.py") -> pd.DataFrame:
     path = data_dir / name
     if not path.exists():
-        raise DataError(f"Data file '{name}' not found. Run `python scripts/download_data.py`.")
+        raise DataError(f"Data file '{name}' not found. Run `python scripts/{script}`.")
     try:
         return pd.read_parquet(path)
     except Exception as exc:  # corrupted file, wrong engine, ...
@@ -86,3 +87,45 @@ def load_rf(data_dir: Path = DATA_DIR) -> pd.Series:
     if rf.empty:
         raise DataError("rf.parquet contains no risk-free observations.")
     return rf.rename("rf")
+
+
+# --- insider trading (SEC Form 4, scripts/download_insiders.py) -------------------------------
+
+INSIDER_SCRIPT = "download_insiders.py"
+INSIDER_MARKET_COLUMNS = ["buy_filings", "sell_filings", "buy_companies", "sell_companies",
+                          "buy_value_musd", "sell_value_musd"]
+INSIDER_TRADE_COLUMNS = ["filing_date", "trade_date", "ticker", "issuer_name", "insider", "role", "direction",
+                         "shares", "value_usd", "plan_10b5_1", "accession"]
+
+
+def load_insider_market(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """Monthly market-wide insider activity (all US listed issuers, officers and directors), indexed by
+    month-end of the filing date."""
+    m = _read_parquet("insider_market.parquet", data_dir, INSIDER_SCRIPT)
+    missing = set(INSIDER_MARKET_COLUMNS) - set(m.columns)
+    if missing:
+        raise DataError(f"insider_market.parquet is missing columns {sorted(missing)}.")
+    if m.empty or (m[INSIDER_MARKET_COLUMNS] < 0).any().any():
+        raise DataError("insider_market.parquet is empty or contains negative counts.")
+    return m.sort_index()
+
+
+def load_insider_trades(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """Open-market purchase and sale filings by officers and directors of our stocks (one row per Form 4)."""
+    t = _read_parquet("insider_trades.parquet", data_dir, INSIDER_SCRIPT)
+    missing = set(INSIDER_TRADE_COLUMNS) - set(t.columns)
+    if missing:
+        raise DataError(f"insider_trades.parquet is missing columns {sorted(missing)}.")
+    if not t["direction"].isin(["buy", "sell"]).all():
+        raise DataError("insider_trades.parquet: direction must be 'buy' or 'sell'.")
+    return t.sort_values("filing_date").reset_index(drop=True)
+
+
+def load_insider_metadata(data_dir: Path = DATA_DIR) -> dict:
+    path = data_dir / "insider_metadata.json"
+    if not path.exists():
+        raise DataError(f"insider_metadata.json not found. Run `python scripts/{INSIDER_SCRIPT}`.")
+    try:
+        return json.loads(path.read_text())
+    except ValueError as exc:
+        raise DataError(f"Could not read insider_metadata.json: {exc}") from exc

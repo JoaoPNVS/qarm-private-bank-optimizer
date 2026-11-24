@@ -60,7 +60,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - Infeasibility diagnosis: the optimiser never crashes; a deletion filter names the minimal set
   of conflicting constraints and the ones whose removal alone restores feasibility.
 
-## Data (yfinance only; Wikipedia for the constituent snapshot)
+## Data (yfinance; Wikipedia for the constituent snapshot; SEC for insider trades)
 - **Universe** (`data/universe.csv`, one file, each asset tagged with asset_class, sector,
   is_EM, bond_type):
   - the 150 current US stocks (all Nasdaq-100 members + the largest other S&P 500 members,
@@ -108,6 +108,20 @@ Grading criteria (from the professor) — every feature should serve one of thes
   and the optimiser benefits most because it overweights past winners. SPY is free of this
   bias, so outperformance versus SPY must be read as an UPPER bound. A clean study would need
   point-in-time constituents (e.g. CRSP), which are not freely available.
+- **Insider trades (SEC Form 4)**, `scripts/download_insiders.py`: the SEC "Insider Transactions
+  Data Sets" (XML part of every Form 3/4/5, one zip per quarter, 2006Q1-2026Q3; the newest files
+  moved to a second SEC folder, both are tried). Kept: Form 4 only (not 4/A or 5), open-market
+  purchases (code P) and sales (S) by officers and directors (pure 10% holders left out), listed
+  issuers, dated by FILING date. About 1.1 million filings; 74,000 in our stocks (2,527 purchases).
+  Outputs (committed, small): `data/insider_market.parquet` (monthly, all US issuers: filings and
+  companies with purchases / sales, USD amounts), `data/insider_trades.parquet` (every purchase or
+  sale filing in one of our stocks), `data/insider_metadata.json`. Issuers are matched to our tickers
+  by SEC CIK (`company_tickers.json`), plus `FORMER_CIKS` for reorganisations (Google Inc. before
+  Alphabet, Avago/Broadcom Ltd, Praxair for LIN, Baker Hughes Inc for BKR, ...) and
+  `CIK_VALID_FROM` (Merck's CIK was Schering-Plough's until Nov 2009). Foreign private issuers
+  (ASML, CCEP, FER, SHOP, TRI) are exempt from Form 4. **The SEC requires a contact:** run with
+  `SEC_USER_AGENT="Name email"` (environment variable, never written to the repo). Raw zips
+  (~0.8 GB) are cached OUTSIDE the repo (`~/.cache/qarm-insiders`), reduced to small extracts.
 - **Data is downloaded once and saved to `data/*.parquet`, which are committed to the repo.**
   The Streamlit app reads parquet only — it must never call the network at runtime.
 
@@ -115,17 +129,39 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully
   invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
   (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
-- **Expected returns: Black-Litterman** (`black_litterman_mu`, `with_view_confidence` in
-  `src/estimators.py`). Prior = equilibrium returns by reverse optimisation,
-  pi = delta Cov(asset, market) with market = 60% SPY / 40% AGG and delta = 2.5. Views = every
-  asset's 60-month historical mean (P = identity), Omega = diag(tau Sigma) (1 - c) / c with
-  tau = 0.05 (He & Litterman). c = "confidence in past performance", a slider 0-25% (Client settings),
-  default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
+- **Expected returns: Black-Litterman** with a choice of HOUSE VIEW (Client settings).
+  Prior = equilibrium returns by reverse optimisation, pi = delta Cov(asset, market) with
+  market = 60% SPY / 40% AGG and delta = 2.5. General posterior for any views
+  (`black_litterman_posterior` in `src/estimators.py`): mu = pi + tau Sigma P'(P tau Sigma P' + Omega)^-1
+  (Q - P pi), Omega = diag(P tau Sigma P') (1 - c) / c, tau = 0.05 (He & Litterman).
+- **House view 1 (DEFAULT): insider trading** (`src/insiders.py`). Breadth of insider buying = among
+  the US listed companies whose officers/directors traded on the open market over the last 3 months,
+  the share with purchases (counting companies, not dollars). z-score against its own last 60 months
+  (it drifts down since 2006 as 10b5-1 sale plans spread), capped at +-2. ONE relative view:
+  E[SPY] - E[AGG] = equilibrium spread + 2% x z. Confidence c: slider 0-90%, default 50% (for a
+  single view, c is exactly its weight against the equilibrium). Point in time: filings dated up to
+  the rebalancing date; no view if the data is older than 6 months. Evidence: breadth peaked at the
+  market lows (Dec 2008 - Mar 2009, Oct 2011, May 2020); after the top fifth of months by breadth,
+  SPY beat the T-bill by ~20% over the next year vs ~12% after the other months; 12-month
+  predictive regression Newey-West t ~2.2 (modest, noisy; insiders also bought early in 2008).
+  **Stock-level purchases are NOT used as views:** in our 150 large companies, stocks bought by
+  their insiders did no better than the same month's universe or sector average over 3-12 months
+  (`purchase_event_study`, t-stats around 0); shown in the app as information only. Backtest
+  2012-2026 at c = 50% vs no view (c = 0): Sharpe +0.01 to +0.03 in every profile, smaller
+  drawdowns, realised volatility at the budget (Balanced 1.09 vs 1.07, 10.1% realised, max DD
+  -19.2% vs -20.1%). The breadth uses ALL listed companies, so it is free of our universe's
+  survivorship bias.
+- **House view 2: past performance** (`black_litterman_mu`, `with_view_confidence`). Views = every
+  asset's 60-month historical mean (P = identity). c = "confidence in past performance", a
+  slider 0-25%, default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
   typical asset moves about a third of the way to its historical mean, SPY most of the way.
   Backtest 2012-2026, Balanced: Sharpe 1.15 (old method 0.97, equal weight 1.16), realised
   volatility 11.1% for a 10% budget (old 12.7%); c = 0 keeps the budget (10.0%). Omega
   proportional to the full tau Sigma (exact linear blend) was tested and rejected (worse). The
   portfolio and the benchmarks (SPY, AGG) get their expected returns from the same posterior.
+  Its higher backtest Sharpe comes with more risk than promised in every profile (e.g. 7.0% for a
+  6% budget), deeper drawdowns and twice the turnover, and partly with hindsight: it favours past
+  winners in a list of today's winners. Hence the insider view is the default.
 - Previous method, kept for comparison and tests: historical mean over the 60-month window, shrunk toward the grand mean of
   the asset's shrinkage group: mu_i = (1 - a) m_i + a m_group, **a = 0.8**. Groups = asset
   classes, except **bonds, grouped by maturity bucket** (Short / Intermediate / Long): with 15
@@ -185,10 +221,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
   by golden-section search on the volatility cap (the Sharpe ratio along a concave frontier has one
   peak); capital market line from the T-bill (origin, returns are in excess) through it.
 
-## App (`app.py`, dark UI: four tabs in a floating bottom navigation, no sidebar)
-1. **Client Profile** — "Client settings" box (wealth, profile override, view confidence; these
-   inputs drive every tab), the questionnaire as an accordion, and the resulting profile with the
-   reasons.
+## App (`app.py`, dark UI: five tabs in a floating bottom navigation, no sidebar)
+1. **Client Profile** — "Client settings" box (wealth, profile override, house view: insider trading
+   or past performance, and its confidence; these inputs drive every tab), the questionnaire as an
+   accordion, and the resulting profile with the reasons.
 2. **Portfolio** — "Adjust constraints" expander (each constraint with its toggle/slider, preset to
    the profile defaults; clear message naming the conflicting constraints when infeasible) and four
    sub-tabs:
@@ -202,9 +238,15 @@ Grading criteria (from the professor) — every feature should serve one of thes
    - *Bonds*: share of bonds, average duration and rating, investment-grade and high-yield shares,
      breakdown by issuer type, maturity bucket and credit quality, table of bond funds (`src/bonds.py`);
    - *Holdings*: holdings chart, full allocation in USD, binding constraints.
-3. **Backtest** — cumulative performance vs SPY and profile benchmark, ex-ante vs realised
-   volatility, drawdowns, allocation over time, then the metrics and trading tables.
-4. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
+3. **Insider Signal** — what the insider view says today (breadth, z-score, equity premium vs
+   equilibrium, equities in the portfolio vs no view), breadth over time against SPY, the evidence
+   (next-12-month SPY return by breadth quintile, honest limits), the Black-Litterman formula and
+   view table, recent purchases in our companies and the stock-level event study (why we do not bet
+   on single stocks), data source and coverage.
+4. **Backtest** — cumulative performance vs SPY and profile benchmark, ex-ante vs realised
+   volatility, drawdowns, allocation over time, then the metrics and trading tables; a "Compare the
+   house views" toggle backtests insider (50%), past performance (10%) and no view side by side.
+5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
    stated limit, worst fall, one-year VaR and expected shortfall, vs benchmark.
 - **About Us** — a dialog opened by the top-right button: short project presentation and one card
   per team member. Team data lives in ONE editable file, `data/team.json` (name, role, description,
@@ -217,6 +259,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
 app.py                     # Streamlit UI only — no heavy logic
 src/data.py                # loading parquet, universe tags
 src/estimators.py          # Black-Litterman (and shrunk) means, Ledoit-Wolf covariance, eligibility window
+src/insiders.py            # insider-buying breadth, the insider house view, evidence tables
 src/optimizer.py           # cvxpy problem builder, constraint objects, infeasibility diagnosis
 src/frontier.py            # efficient frontier under the client's constraints, min-variance, tangency
 src/diversification.py     # risk contributions (Euler), diversification measures
@@ -228,6 +271,7 @@ src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, de
 src/team.py                # About Us: team.json loader, photo or initials avatar
 scripts/build_universe.py  # constituents snapshot -> data/universe.csv
 scripts/download_data.py   # prices, risk-free rate, benchmarks -> data/*.parquet
+scripts/download_insiders.py  # SEC Form 4 data sets -> data/insider_*.parquet (needs SEC_USER_AGENT)
 tests/                     # pytest for data, estimators, constraints, profiles, backtest
 reference/                 # friend's app — read-only inspiration, NEVER copy its ERC logic
 ```

@@ -1,0 +1,523 @@
+{
+  "source": "https://www.sec.gov/data-research/sec-markets-data/insider-transactions-data-sets",
+  "quarters": [
+    "2006q1",
+    "2026q3"
+  ],
+  "first_filing": "2006-01-03",
+  "last_filing": "2026-09-30",
+  "generated_utc": "2026-11-24 14:23",
+  "filters": "Form 4, open-market purchases (P) and sales (S), officers and directors, listed issuers",
+  "insider_filings": 1097174,
+  "universe_filings": 74070,
+  "issuer_ciks": {
+    "GOOGL": [
+      1652044,
+      1288776
+    ],
+    "APP": [
+      1751008
+    ],
+    "CMCSA": [
+      1166691
+    ],
+    "META": [
+      1326801
+    ],
+    "NBIS": [
+      1513845
+    ],
+    "NFLX": [
+      1065280
+    ],
+    "TMUS": [
+      1283699
+    ],
+    "TTWO": [
+      946581
+    ],
+    "VZ": [
+      732712
+    ],
+    "DIS": [
+      1744489,
+      1001039
+    ],
+    "ABNB": [
+      1559720
+    ],
+    "AMZN": [
+      1018724
+    ],
+    "BKNG": [
+      1075531
+    ],
+    "DASH": [
+      1792789
+    ],
+    "HD": [
+      354950
+    ],
+    "MAR": [
+      1048286
+    ],
+    "MCD": [
+      63908
+    ],
+    "MELI": [
+      1099590
+    ],
+    "ORLY": [
+      898173
+    ],
+    "PDD": [
+      1737806
+    ],
+    "ROST": [
+      745732
+    ],
+    "SBUX": [
+      829224
+    ],
+    "TJX": [
+      109198
+    ],
+    "TSLA": [
+      1318605
+    ],
+    "KO": [
+      21344
+    ],
+    "CCEP": [
+      1650107
+    ],
+    "COST": [
+      909832
+    ],
+    "KDP": [
+      1418135
+    ],
+    "MDLZ": [
+      1103982
+    ],
+    "MNST": [
+      865752
+    ],
+    "PEP": [
+      77476
+    ],
+    "PM": [
+      1413329
+    ],
+    "PG": [
+      80424
+    ],
+    "WMT": [
+      104169
+    ],
+    "BKR": [
+      1701605,
+      808362
+    ],
+    "CVX": [
+      93410
+    ],
+    "COP": [
+      1163165
+    ],
+    "FANG": [
+      1539838
+    ],
+    "XOM": [
+      2115436,
+      34088
+    ],
+    "AXP": [
+      4962
+    ],
+    "BAC": [
+      70858
+    ],
+    "BRK-B": [
+      1067983
+    ],
+    "BLK": [
+      2012383,
+      1364742,
+      1060021
+    ],
+    "SCHW": [
+      316709
+    ],
+    "C": [
+      831001
+    ],
+    "GS": [
+      886982
+    ],
+    "JPM": [
+      19617
+    ],
+    "MA": [
+      1141391
+    ],
+    "MS": [
+      895421
+    ],
+    "PYPL": [
+      1633917
+    ],
+    "V": [
+      1403161
+    ],
+    "WFC": [
+      72971
+    ],
+    "ABBV": [
+      1551152
+    ],
+    "ABT": [
+      1800
+    ],
+    "ALNY": [
+      1178670
+    ],
+    "AMGN": [
+      318154
+    ],
+    "DHR": [
+      313616
+    ],
+    "DXCM": [
+      1093557
+    ],
+    "GEHC": [
+      1932393
+    ],
+    "GILD": [
+      882095
+    ],
+    "IDXX": [
+      874716
+    ],
+    "ISRG": [
+      1035267
+    ],
+    "JNJ": [
+      200406
+    ],
+    "LLY": [
+      59478
+    ],
+    "MRK": [
+      310158,
+      64978
+    ],
+    "MRNA": [
+      1682852
+    ],
+    "PFE": [
+      78003
+    ],
+    "REGN": [
+      872589
+    ],
+    "TMO": [
+      97745
+    ],
+    "UNH": [
+      731766
+    ],
+    "VRTX": [
+      875320
+    ],
+    "ADP": [
+      8670
+    ],
+    "AXON": [
+      1069183
+    ],
+    "BA": [
+      12927
+    ],
+    "CSX": [
+      277948
+    ],
+    "CAT": [
+      18230
+    ],
+    "CTAS": [
+      723254
+    ],
+    "CPRT": [
+      900075
+    ],
+    "DE": [
+      315189
+    ],
+    "ETN": [
+      1551182,
+      31277
+    ],
+    "FAST": [
+      815556
+    ],
+    "FER": [
+      1468522
+    ],
+    "GE": [
+      40545
+    ],
+    "GEV": [
+      1996810
+    ],
+    "HONA": [
+      2089271
+    ],
+    "HON": [
+      773840
+    ],
+    "ODFL": [
+      878927
+    ],
+    "PCAR": [
+      75362
+    ],
+    "PAYX": [
+      723531
+    ],
+    "RTX": [
+      101829
+    ],
+    "RKLB": [
+      1819994
+    ],
+    "SPCX": [
+      1181412
+    ],
+    "TRI": [
+      1075124
+    ],
+    "UNP": [
+      100885
+    ],
+    "ASML": [
+      937966
+    ],
+    "ACN": [
+      1467373,
+      1134538
+    ],
+    "ADBE": [
+      796343
+    ],
+    "AMD": [
+      2488
+    ],
+    "APH": [
+      820313
+    ],
+    "ADI": [
+      6281
+    ],
+    "AAPL": [
+      320193
+    ],
+    "AMAT": [
+      6951
+    ],
+    "ANET": [
+      1596532
+    ],
+    "ARM": [
+      1973239
+    ],
+    "ALAB": [
+      1736297
+    ],
+    "ADSK": [
+      769397
+    ],
+    "AVGO": [
+      1730168,
+      1441634,
+      1649338
+    ],
+    "CDNS": [
+      813672
+    ],
+    "CSCO": [
+      858877
+    ],
+    "CRWV": [
+      1769628
+    ],
+    "CRWD": [
+      1535527
+    ],
+    "DDOG": [
+      1561550
+    ],
+    "DELL": [
+      1571996
+    ],
+    "FTNT": [
+      1262039
+    ],
+    "IBM": [
+      51143
+    ],
+    "INTC": [
+      50863
+    ],
+    "INTU": [
+      896878
+    ],
+    "KLAC": [
+      319201
+    ],
+    "LRCX": [
+      707549
+    ],
+    "LITE": [
+      1633978
+    ],
+    "MRVL": [
+      1835632,
+      1058057
+    ],
+    "MSTR": [
+      1050446
+    ],
+    "MCHP": [
+      827054
+    ],
+    "MU": [
+      723125
+    ],
+    "MSFT": [
+      789019
+    ],
+    "MPWR": [
+      1280452
+    ],
+    "NXPI": [
+      1413447
+    ],
+    "NVDA": [
+      1045810
+    ],
+    "ORCL": [
+      1341439
+    ],
+    "PLTR": [
+      1321655
+    ],
+    "PANW": [
+      1327567
+    ],
+    "QCOM": [
+      804328
+    ],
+    "ROP": [
+      882835
+    ],
+    "CRM": [
+      1108524
+    ],
+    "SNDK": [
+      2023554
+    ],
+    "STX": [
+      1137789
+    ],
+    "NOW": [
+      1373715
+    ],
+    "SHOP": [
+      1594805
+    ],
+    "SNPS": [
+      883241
+    ],
+    "TER": [
+      97210
+    ],
+    "TXN": [
+      97476
+    ],
+    "WDC": [
+      106040
+    ],
+    "WDAY": [
+      1327811
+    ],
+    "LIN": [
+      1707925,
+      884905
+    ],
+    "WELL": [
+      766704
+    ],
+    "AEP": [
+      4904
+    ],
+    "CEG": [
+      1868275
+    ],
+    "EXC": [
+      1109357
+    ],
+    "NEE": [
+      753308
+    ],
+    "XEL": [
+      72903
+    ]
+  },
+  "former_ciks": {
+    "GOOGL": {
+      "1288776": "Google Inc., before the Alphabet holding (Oct 2015)"
+    },
+    "DIS": {
+      "1001039": "The Walt Disney Company before the 21st Century Fox deal (Mar 2019)"
+    },
+    "BLK": {
+      "1364742": "BlackRock Inc. before the 2024 holding reorganisation",
+      "1060021": "BlackRock Inc. before the 2006 Merrill Lynch asset-management deal"
+    },
+    "XOM": {
+      "34088": "Exxon Mobil Corp (the new 2026 registrant had no Form 4 yet)"
+    },
+    "ETN": {
+      "31277": "Eaton Corp before Eaton Corp plc (Dec 2012)"
+    },
+    "AVGO": {
+      "1441634": "Avago Technologies (2009-2016)",
+      "1649338": "Broadcom Ltd (2016-2018)"
+    },
+    "LIN": {
+      "884905": "Praxair (LIN prices before the 2018 Linde merger are Praxair's)"
+    },
+    "BKR": {
+      "808362": "Baker Hughes Inc (BHI) before the 2017 GE Oil & Gas deal"
+    },
+    "ACN": {
+      "1134538": "Accenture Ltd (Bermuda) before the 2009 move to Ireland"
+    },
+    "MRVL": {
+      "1058057": "Marvell Technology Group Ltd (Bermuda) before the 2021 move to Delaware"
+    },
+    "MRK": {
+      "64978": "Merck & Co before the 2009 Schering-Plough merger"
+    }
+  },
+  "no_registrant": [],
+  "no_filings": [
+    "ASML",
+    "CCEP",
+    "FER",
+    "SHOP",
+    "TRI"
+  ]
+}

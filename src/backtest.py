@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from src import estimators as est, optimizer as opt
+from src import estimators as est, insiders as ins, optimizer as opt
 
 FREQ_MONTHS = {"Quarterly": 3, "Semi-annual": 6, "Annual": 12}
 DEFAULT_START = pd.Timestamp("2012-01-31")
@@ -77,6 +77,12 @@ def estimates_by_date(returns: pd.DataFrame, rf: pd.Series, groups: pd.Series,
 def with_view_confidence(estimates: dict, confidence: float) -> dict:
     """Black-Litterman expected returns at every date (cheap: covariances are reused)."""
     return {d: est.with_view_confidence(e, confidence) for d, e in estimates.items()}
+
+
+def with_insider_view(estimates: dict, signal: pd.DataFrame, confidence: float) -> dict:
+    """Black-Litterman expected returns from the insider view at every date, each using only the
+    insider filings published by that date (src/insiders.py)."""
+    return {d: ins.with_insider_view(e, d, signal, confidence)[0] for d, e in estimates.items()}
 
 
 def _simulate(returns: pd.DataFrame, universe: pd.DataFrame, rebals: list[pd.Timestamp], tc: pd.Series,

@@ -234,6 +234,33 @@ def black_litterman_mu(prior: pd.Series, sample: pd.Series, cov: pd.DataFrame, c
     return mu.rename("mu")
 
 
+def black_litterman_posterior(prior: pd.Series, cov: pd.DataFrame, P: pd.DataFrame, Q: pd.Series,
+                              confidence: float, tau: float = BL_TAU) -> pd.Series:
+    """General Black-Litterman with k views P mu = Q + e (rows of P are portfolios on prior's assets,
+    e.g. +1 SPY -1 AGG for "equities beat bonds by Q", or +1 on one stock for an absolute view):
+        mu = pi + tau Sigma P' (P tau Sigma P' + Omega)^-1 (Q - P pi),
+        Omega = diag(P tau Sigma P') (1 - c) / c                    (He & Litterman).
+    With P = identity and Q = the historical means this is exactly `black_litterman_mu`. c = 0 (or no
+    view) returns the prior; c is the weight of each view against the prior for an isolated view."""
+    if not 0 <= confidence < 1:
+        raise EstimationError("View confidence must be at least 0% and below 100%.")
+    mu = prior.astype(float).copy()
+    if confidence > 0 and len(P):
+        cols = list(prior.index)
+        p = P.reindex(columns=cols, fill_value=0.0).values
+        s = tau * cov.reindex(index=cols, columns=cols, fill_value=0.0).values
+        ps = p @ s
+        psp = ps @ p.T
+        if (np.diag(psp) <= 0).any():
+            raise EstimationError("A view is on an asset without risk (cash); it cannot be weighed.")
+        omega = np.diag(np.diag(psp) * (1 - confidence) / confidence)
+        gap = Q.reindex(P.index).values - p @ prior.values
+        mu[:] = prior.values + ps.T @ np.linalg.solve(psp + omega, gap)
+    if CASH_TICKER in mu:
+        mu[CASH_TICKER] = 0.0
+    return mu.rename("mu")
+
+
 def with_view_confidence(e: Estimates, confidence: float = DEFAULT_VIEW_CONFIDENCE) -> Estimates:
     """The same window's estimates with Black-Litterman expected returns at `confidence`
     (investable assets AND benchmark series, so the portfolio and its benchmark use the same

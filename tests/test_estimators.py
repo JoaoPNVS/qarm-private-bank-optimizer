@@ -135,3 +135,37 @@ def test_black_litterman_errors(window, universe, bl_base):
         est.with_view_confidence(plain, 0.1)
     with pytest.raises(est.EstimationError, match="between 0 and"):
         est.with_view_confidence(bl_base, est.MAX_VIEW_CONFIDENCE + 0.05)
+
+
+def test_general_black_litterman_matches_one_view_per_asset(bl_base):
+    pi, cov = bl_base.prior_mu, bl_base.joint_cov
+    sample = bl_base.sample_mu.reindex(pi.index)
+    risky = [t for t in pi.index if t != data.CASH_TICKER]
+    P = pd.DataFrame(np.eye(len(risky)), index=risky, columns=risky)
+    for c in (0.05, 0.10, 0.25):
+        general = est.black_litterman_posterior(pi, cov, P, sample[risky], c)
+        assert np.allclose(general, est.black_litterman_mu(pi, sample, cov, c))
+
+
+def test_relative_view_blends_the_spread():
+    idx = ["A", "B", data.CASH_TICKER]
+    cov = pd.DataFrame(np.diag([0.04, 0.01, 0.0]), index=idx, columns=idx)
+    prior = pd.Series([0.05, 0.02, 0.0], index=idx)
+    P = pd.DataFrame([[1.0, -1.0, 0.0]], index=["A over B"], columns=idx)
+    for c in (0.1, 0.5):
+        mu = est.black_litterman_posterior(prior, cov, P, pd.Series({"A over B": 0.10}), c)
+        assert np.isclose(mu["A"] - mu["B"], (1 - c) * 0.03 + c * 0.10)   # isolated view: weight c
+        assert mu[data.CASH_TICKER] == 0
+
+
+def test_general_black_litterman_edge_cases(bl_base):
+    pi, cov = bl_base.prior_mu, bl_base.joint_cov
+    P = pd.DataFrame([[1.0, -1.0]], index=["v"], columns=["SPY", "AGG"])
+    q = pd.Series({"v": 0.2})
+    assert np.allclose(est.black_litterman_posterior(pi, cov, P, q, 0.0), pi)
+    assert np.allclose(est.black_litterman_posterior(pi, cov, P.iloc[:0], q.iloc[:0], 0.5), pi)
+    with pytest.raises(est.EstimationError, match="below 100%"):
+        est.black_litterman_posterior(pi, cov, P, q, 1.0)
+    cash = pd.DataFrame([[1.0]], index=["c"], columns=[data.CASH_TICKER])
+    with pytest.raises(est.EstimationError, match="cash"):
+        est.black_litterman_posterior(pi, cov, cash, pd.Series({"c": 0.1}), 0.5)

@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src import (backtest as btm, benchmarks as bm, bonds, data, diversification as div, estimators as est,
-                 frontier as fr, optimizer as opt, profiling as prof, risk, team)
+                 frontier as fr, insiders as ins, optimizer as opt, profiling as prof, risk, team)
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -58,6 +58,7 @@ def pct(x: float, digits: int = 1) -> str:
 
 
 EW_LABEL = "Equal weight (same universe)"
+INSIDER, PAST = "Insider trading", "Past performance"   # house views (Black-Litterman)
 
 
 def bench_label(profile: str) -> str:
@@ -88,6 +89,24 @@ def get_estimates() -> est.Estimates:
                         benchmark_class=bm.BENCHMARK_CLASS)
 
 
+@st.cache_data(show_spinner=False)
+def load_insiders():
+    """(breadth signal, insider trades in our stocks, metadata, None), or (None, None, None, reason) when
+    the insider files are missing: the app then offers the past-performance view only."""
+    try:
+        signal = ins.market_signal(data.load_insider_market())
+        return signal, data.load_insider_trades(), data.load_insider_metadata(), None
+    except data.DataError as exc:
+        return None, None, None, str(exc)
+
+
+def with_views(e: est.Estimates, source: str, confidence: float) -> est.Estimates:
+    """Black-Litterman expected returns with the chosen house view, known at the window's last month."""
+    if source == INSIDER:
+        return ins.with_insider_view(e, e.end, load_insiders()[0], confidence)[0]
+    return est.with_view_confidence(e, confidence)
+
+
 def build_constraints(profile: str, spec: dict) -> list[opt.Constraint]:
     cons = [c for c in prof.default_constraints(profile) if c.key in spec]
     for c in cons:
@@ -96,8 +115,8 @@ def build_constraints(profile: str, spec: dict) -> list[opt.Constraint]:
 
 
 @st.cache_data(show_spinner="Optimising the portfolio...")
-def optimise(profile: str, cons_json: str, confidence: float):
-    e = est.with_view_confidence(get_estimates(), confidence)
+def optimise(profile: str, cons_json: str, source: str, confidence: float):
+    e = with_views(get_estimates(), source, confidence)
     d = prof.problem_data(profile, e, load_data()[0])
     res = opt.solve(d, build_constraints(profile, json.loads(cons_json)))
     eq = prof.SPECS[profile].benchmark_equity
@@ -113,11 +132,18 @@ def backtest_estimates() -> dict:
     return btm.estimates_by_date(returns, rf, est.shrinkage_groups(universe), dates, benchmarks=bench)
 
 
+def backtest_views(source: str, confidence: float) -> dict:
+    """Estimates at every rebalancing with the chosen house view (each date uses only data known then)."""
+    if source == INSIDER:
+        return btm.with_insider_view(backtest_estimates(), load_insiders()[0], confidence)
+    return btm.with_view_confidence(backtest_estimates(), confidence)
+
+
 @st.cache_data(show_spinner="Running the backtest (re-optimising at every rebalancing)...")
-def run_backtest(profile: str, cons_json: str, freq: str, confidence: float):
+def run_backtest(profile: str, cons_json: str, freq: str, source: str, confidence: float):
     universe, returns, rf, bench = load_data()
     res = btm.run_backtest(returns, rf, universe, build_constraints(profile, json.loads(cons_json)),
-                           freq=freq, estimates=btm.with_view_confidence(backtest_estimates(), confidence))
+                           freq=freq, estimates=backtest_views(source, confidence))
     ew = btm.run_equal_weight(returns, universe, prof.SPECS[profile].min_bonds, freq=freq)
     idx = res.returns.index
     series = pd.DataFrame({"Strategy": res.returns, EW_LABEL: ew.returns.reindex(idx),
@@ -128,10 +154,10 @@ def run_backtest(profile: str, cons_json: str, freq: str, confidence: float):
 
 
 @st.cache_data(show_spinner="Computing the efficient frontier...")
-def frontiers(profile: str, cons_json: str, confidence: float):
+def frontiers(profile: str, cons_json: str, source: str, confidence: float):
     """Efficient frontier with the client's constraints and without them (long-only only), and the
     maximum-Sharpe (tangency) portfolio under the client's constraints."""
-    e = est.with_view_confidence(get_estimates(), confidence)
+    e = with_views(get_estimates(), source, confidence)
     d = prof.problem_data(profile, e, load_data()[0])
     top = max(0.25, 1.6 * prof.SPECS[profile].max_volatility)
     cons = build_constraints(profile, json.loads(cons_json))
@@ -140,12 +166,12 @@ def frontiers(profile: str, cons_json: str, confidence: float):
 
 
 @st.cache_data(show_spinner="Simulating 5,000 wealth paths...")
-def simulate(profile: str, cons_json: str, freq: str, confidence: float, years: int, wealth: float,
+def simulate(profile: str, cons_json: str, freq: str, source: str, confidence: float, years: int, wealth: float,
              loss_limit: float):
     """Block bootstrap of the strategy's OUT-OF-SAMPLE backtest returns (at every date the portfolio
     was chosen with past data only, net of trading costs) and of the profile benchmark on the same
     months. Replaying today's weights on the months used to choose them would be in-sample (look-ahead)."""
-    _, series = run_backtest(profile, cons_json, freq, confidence)[1:]
+    _, series = run_backtest(profile, cons_json, freq, source, confidence)[1:]
     hist = series[["Strategy", bench_label(profile)]].dropna()
     hist.columns = ["Portfolio", "Benchmark"]
     sim = risk.wealth_simulation(hist, wealth, years, year_loss_limit=loss_limit)
@@ -391,13 +417,14 @@ st.title("Private Client Portfolio Optimizer")
 st.caption("Highest expected return within the client's volatility budget. All figures in USD.")
 
 with st.container(key="main-nav"):
-    tabs = st.tabs(["Client Profile", "Portfolio", "Backtest", "Simulation"])
+    tabs = st.tabs(["Client Profile", "Portfolio", "Insider Signal", "Backtest", "Simulation"])
 
 # --- Client Profile --------------------------------------------------------------------------
 
 with tabs[0], guarded("Client Profile"):
     with st.expander("Client settings", expanded=True):
-        s1, s2, s3 = st.columns(3)
+        signal, insider_trades, insider_meta, insider_error = load_insiders()
+        s1, s2, s3, s4 = st.columns(4)
         with s1:
             wealth = st.number_input("Client wealth (USD)", min_value=100_000, max_value=1_000_000_000,
                                      value=5_000_000, step=250_000, format="%d")
@@ -405,18 +432,34 @@ with tabs[0], guarded("Client Profile"):
             choice = st.selectbox("Risk profile", ["auto"] + prof.PROFILES, key="profile",
                                   format_func=lambda p: f"From questionnaire ({assessment.profile})" if p == "auto" else p)
         with s3:
-            confidence = st.slider(
-                "Confidence in past performance", 0, int(est.MAX_VIEW_CONFIDENCE * 100),
-                int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
+            view_source = st.radio(
+                "House view", [INSIDER, PAST] if signal is not None else [PAST], key="view_source",
                 help="Black-Litterman. Expected returns start from the market equilibrium: each asset's return "
-                     "reflects only its risk relative to a 60% SPY / 40% AGG market portfolio. Each asset's average "
-                     f"return over the last {WINDOW} months is then added as a view, with this confidence. Because "
-                     "assets move together, the views reinforce each other, so even 10% tilts the portfolio noticeably. "
-                     "0% = pure equilibrium: most diversified, closest to the promised risk. Higher = more weight on "
-                     "recent trends, with more risk and trading.") / 100
+                     "reflects only its risk relative to a 60% SPY / 40% AGG market portfolio. The house view then "
+                     "tilts them. Insider trading: when officers and directors across US companies buy their own "
+                     "shares more than usual, equities are expected to beat bonds by more (see the Insider Signal "
+                     f"tab). Past performance: each asset's average return over the last {WINDOW} months.")
+        with s4:
+            if view_source == INSIDER:
+                confidence = st.slider(
+                    "Confidence in the insider view", 0, int(ins.MAX_CONFIDENCE * 100),
+                    int(ins.DEFAULT_CONFIDENCE * 100), 5, format="%d%%", key="views_insider",
+                    help="Weight of the insider view against the market equilibrium: at 50% the expected premium "
+                         "of equities over bonds moves halfway from the equilibrium to the insider view. 0% = pure "
+                         "equilibrium. Higher = larger tilts, with more trading.") / 100
+            else:
+                confidence = st.slider(
+                    "Confidence in past performance", 0, int(est.MAX_VIEW_CONFIDENCE * 100),
+                    int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
+                    help=f"Each asset's average return over the last {WINDOW} months is added as a view, with this "
+                         "confidence. Because assets move together, the views reinforce each other, so even 10% "
+                         "tilts the portfolio noticeably. 0% = pure equilibrium: most diversified, closest to the "
+                         "promised risk. Higher = more weight on recent trends, with more risk and trading.") / 100
+        insider_note = (f" Insider trades: SEC Form 4 filings up to {pd.Timestamp(insider_meta['last_filing']):%B %Y}."
+                        if insider_meta else f" Insider view unavailable: {insider_error}")
         st.caption(f"Data: monthly total returns in USD up to {returns.index[-1]:%B %Y} (yfinance). "
                    f"Estimates use the last {WINDOW} months. Risk-free: 3-month T-bill, currently "
-                   f"{rf.iloc[-1] * 12:.2%} p.a.")
+                   f"{rf.iloc[-1] * 12:.2%} p.a.{insider_note}")
 
     profile = assessment.profile if choice == "auto" else choice
     spec_p = prof.SPECS[profile]
@@ -539,7 +582,7 @@ with tabs[1], guarded("Portfolio"):
 
     cons_json = json.dumps(cons_spec, sort_keys=True)
     try:
-        res, bench_stats, spy_stats, te = optimise(profile, cons_json, confidence)
+        res, bench_stats, spy_stats, te = optimise(profile, cons_json, view_source, confidence)
     except EXPECTED_ERRORS as exc:
         st.error(f"The portfolio could not be computed: {exc}")
         st.stop()
@@ -576,15 +619,18 @@ with tabs[1], guarded("Portfolio"):
                                 index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
             st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
                          .format("{:.2f}", subset=pd.IndexSlice[["Sharpe ratio"], :]), width="stretch")
+            view_text = ("the insider view (equities vs bonds, from the breadth of insider buying across US "
+                         "companies; see the Insider Signal tab)" if view_source == INSIDER
+                         else "each asset's recent average return as a view")
             st.caption(f"Ex-ante figures, estimated on the last {WINDOW} months. Expected returns: Black-Litterman, i.e. "
-                       "market-equilibrium returns (implied by a 60% SPY / 40% AGG market portfolio) combined with each "
-                       f"asset's recent average return as a view, at {confidence:.0%} confidence. Risk: Ledoit-Wolf "
+                       "market-equilibrium returns (implied by a 60% SPY / 40% AGG market portfolio) combined with "
+                       f"{view_text}, at {confidence:.0%} confidence. Risk: Ledoit-Wolf "
                        "covariance. The portfolio and its benchmarks are estimated with the same method; see the "
                        "Backtest tab for what this strategy actually delivered.")
 
             st.markdown("### Efficient frontier")
             try:
-                front, free, tangency = frontiers(profile, cons_json, confidence)
+                front, free, tangency = frontiers(profile, cons_json, view_source, confidence)
             except EXPECTED_ERRORS as exc:
                 st.error(f"The efficient frontier could not be computed: {exc}")
                 front = None
@@ -778,13 +824,158 @@ with tabs[1], guarded("Portfolio"):
                     "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
                     {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
 
-with tabs[2], guarded("Backtest"):
+# --- Insider Signal --------------------------------------------------------------------------
+
+with tabs[2], guarded("Insider Signal"):
+    st.subheader("House view: what company insiders do with their own money")
+    if signal is None:
+        st.info(f"The insider data is not available, so the app uses the past-performance view. ({insider_error})")
+    else:
+        st.markdown(
+            "Every officer and director of a US listed company must report a trade in their own company's shares "
+            "to the SEC within two business days (**Form 4**). We read all of them since 2006, about "
+            f"{insider_meta['insider_filings'] / 1e6:.1f} million filings, and measure how many companies' insiders "
+            "are **buying** on the open market rather than selling. Insiders sell for many reasons (diversification, "
+            "taxes, automatic sale plans); they buy for one: they expect the price to rise. When buying spreads "
+            "across companies, we expect equities to beat bonds by more than usual, and tilt the portfolio "
+            "toward equities, within the client's volatility budget.")
+        conf_ins = confidence if view_source == INSIDER else ins.DEFAULT_CONFIDENCE
+        e_now = get_estimates()
+        e_ins, view = ins.with_insider_view(e_now, e_now.end, signal, conf_ins)
+        if view.z is None:
+            st.warning("The latest insider data is too old to form a view: the portfolio uses the equilibrium returns.")
+        else:
+            hist = signal["buy_share"].loc[:view.data_month].tail(ins.Z_WINDOW)
+            mood = "above normal" if view.z > 0.5 else "below normal" if view.z < -0.5 else "normal"
+            eq_spread = view.table.at[0, "equilibrium"]
+            post_spread = view.table.at[0, "posterior"]
+            c = st.columns(4)
+            c[0].metric("Insider buying breadth", pct(view.buy_share, 0),
+                        f"{(view.buy_share - hist.mean()) * 100:+.1f} pp vs 5-year average", delta_color="off",
+                        help=f"Share of companies with insider purchases among the US listed companies whose "
+                             f"officers or directors traded on the open market in the 3 months to "
+                             f"{view.data_month:%B %Y}. 5-year average: {hist.mean():.0%}.")
+            c[1].metric("Signal", mood.capitalize(), f"{view.z:+.1f} standard deviations", delta_color="off",
+                        help="Breadth compared with its own last 5 years (z-score, capped at ±2). Insider buying has "
+                             "drifted down since 2006 as automatic sale plans spread, so it is compared with its "
+                             "recent history rather than a fixed level.")
+            c[2].metric("Expected premium of equities over bonds", pct(post_spread, 2),
+                        f"{(post_spread - eq_spread) * 1e4:+.0f} bps vs equilibrium",
+                        help=f"SPY minus AGG, annualised. Equilibrium {eq_spread:.2%}; insider view "
+                             f"{view.table.at[0, 'view_value']:.2%}; blended at {conf_ins:.0%} confidence "
+                             "(Black-Litterman).")
+            if view_source == INSIDER and res.ok:
+                try:
+                    res0 = optimise(profile, cons_json, INSIDER, 0.0)[0]
+                except EXPECTED_ERRORS:
+                    res0 = None
+                if res0 is not None and res0.ok:
+                    is_eq_ = universe["asset_class"] == "Equity"
+                    eq_with = res.weights.reindex(universe.index).fillna(0)[is_eq_].sum()
+                    eq_without = res0.weights.reindex(universe.index).fillna(0)[is_eq_].sum()
+                    c[3].metric("Equities in the portfolio", pct(eq_with, 1),
+                                f"{(eq_with - eq_without) * 100:+.1f} pp vs no view",
+                                help=f"Without any view (pure equilibrium) the portfolio would hold {eq_without:.1%} "
+                                     "in equities. The volatility budget and the bond floor limit the tilt.")
+            else:
+                c[3].metric("House view in use", view_source, help="Choose 'Insider trading' in Client settings (Client Profile tab) to use it.")
+
+        recent_share = signal["buy_share"].dropna()
+        spy_growth = (1 + bench["SPY"].reindex(recent_share.index).fillna(0)).cumprod()
+        avg5 = signal["buy_share"].rolling(ins.Z_WINDOW, min_periods=ins.Z_MIN_MONTHS).mean()
+        f = go.Figure([
+            go.Scatter(x=recent_share.index, y=recent_share * 100, name="Insider buying breadth (3 months)",
+                       line=dict(color=NAVY, width=2.5)),
+            go.Scatter(x=avg5.index, y=avg5 * 100, name="Its 5-year average", line=dict(color=NAVY, width=1, dash="dot")),
+            go.Scatter(x=spy_growth.index, y=spy_growth, name="SPY, growth of 1 USD (right axis)", yaxis="y2",
+                       line=dict(color=ACCENT, width=1.5))])
+        f.update_layout(title="Insiders buy when markets are low", yaxis_title="% of companies with insider purchases",
+                        yaxis2=dict(overlaying="y", side="right", type="log", showgrid=False, title="SPY (log)"))
+        st.plotly_chart(fig_layout(f, 420), width="stretch")
+        st.caption("Breadth = among the US listed companies whose officers or directors bought or sold their own "
+                   "shares on the open market over the last 3 months, the share with purchases (counting companies, "
+                   "not dollars, so a few huge sales do not dominate). It peaked at the market lows of 2008-2009, "
+                   "autumn 2011 and spring 2020.")
+
+        st.markdown("#### Did insider buying predict the market?")
+        bench_ex = (bench["SPY"] - rf.reindex(bench.index)).dropna()
+        evid = ins.market_evidence(signal, bench_ex)
+        e1, e2 = st.columns([3, 2], gap="large")
+        if len(evid):
+            f = go.Figure(go.Bar(x=evid.index.astype(str), y=evid["next_return"] * 100, marker_color=NAVY,
+                                 text=[f"{v:.1%}" for v in evid["next_return"]], textposition="outside"))
+            f.update_layout(title="SPY return above T-bill over the next 12 months, by insider-buying quintile",
+                            xaxis_title="Months sorted by insider buying (z-score)", yaxis_title="% (average)")
+            e1.plotly_chart(fig_layout(f, 380), width="stretch")
+        if len(evid):
+            top_ret = evid["next_return"].iloc[-1]
+            rest_ret = (evid["next_return"].iloc[:-1] * evid["months"].iloc[:-1]).sum() / evid["months"].iloc[:-1].sum()
+            e2.markdown(
+                f"Months are split into five equal groups by the insider signal ({int(evid['months'].sum())} months "
+                f"since {signal['z'].first_valid_index():%Y} with a known next year). After the fifth of months with "
+                f"the broadest insider buying, SPY beat the T-bill by **{top_ret:.0%}** over the next year on "
+                f"average, against **{rest_ret:.0%}** after the other months.\n\n"
+                "**Honest limits.** The effect is modest and noisy: the four other groups are not in order, and a "
+                "12-month regression gives a Newey-West t-statistic of about 2. Insiders also tend to buy early: "
+                "in spring 2008 they bought before the worst of the crisis. This is why the view only tilts the "
+                "portfolio, with a confidence you choose, and never leaves the volatility budget.")
+
+        with st.expander("How the view enters the portfolio (Black-Litterman)"):
+            st.markdown(
+                "One relative view, *equities (SPY) will beat bonds (AGG) by Q*, with "
+                f"Q = equilibrium spread + {ins.KAPPA:.0%} × z (z capped at ±{ins.Z_CAP:.0f}). Posterior returns: "
+                "μ = π + τΣP′(PτΣP′ + Ω)⁻¹(Q − Pπ), with P = (+1 SPY, −1 AGG), τ = "
+                f"{est.BL_TAU}, Ω = PτΣP′(1 − c)/c and c the confidence. For this single view, c is exactly its "
+                "weight against the equilibrium. Every asset moves according to its covariance with SPY minus AGG: "
+                "equity-like assets gain the most. Only filings published by each rebalancing date are used in "
+                "the backtest.")
+            if len(view.table):
+                st.dataframe(view.table.rename(columns={"view": "View", "equilibrium": "Equilibrium",
+                                                        "view_value": "Insider view", "posterior": "After blending",
+                                                        "evidence": "Evidence"}).style.format(
+                    {"Equilibrium": "{:.2%}", "Insider view": "{:.2%}", "After blending": "{:.2%}"}),
+                    hide_index=True, width="stretch")
+
+        st.markdown("#### What insiders did in our companies")
+        last = returns.index[-1]
+        recent = ins.recent_purchases(insider_trades, last)
+        sales = insider_trades[(insider_trades["direction"] == "sell")
+                               & (insider_trades["filing_date"] > last - pd.DateOffset(months=ins.RECENT_MONTHS))]
+        st.markdown(f"In the {ins.RECENT_MONTHS} months to {last:%B %Y}: **{len(recent)} purchases** "
+                    f"(at least {usd_short(ins.MIN_PURCHASE_USD)}) in {recent['ticker'].nunique()} of our companies, "
+                    f"against **{len(sales):,} sales** in {sales['ticker'].nunique()} companies.")
+        if len(recent):
+            show = recent.assign(Company=[label(t) for t in recent["ticker"]])[
+                ["filing_date", "Company", "insider", "role", "value_usd"]].rename(columns={
+                    "filing_date": "Filed", "insider": "Insider", "role": "Role", "value_usd": "Amount (USD)"})
+            st.dataframe(show.style.format({"Filed": lambda d: f"{d:%d %b %Y}", "Amount (USD)": lambda x: usd(x)}),
+                         hide_index=True, width="stretch", height=min(400, 38 + 35 * len(show)))
+        study = ins.purchase_event_study(insider_trades, returns, universe)
+        s1, s2 = st.columns([2, 3], gap="large")
+        s1.dataframe(study.rename(columns={"vs_universe": "vs our stocks", "t_universe": "t-stat",
+                                           "vs_sector": "vs same sector", "t_sector": "t-stat ", "events": "Events"})
+                     .style.format({"vs our stocks": "{:+.2%}", "vs same sector": "{:+.2%}", "t-stat": "{:.1f}",
+                                    "t-stat ": "{:.1f}"}), width="stretch")
+        s2.markdown("**Why we do not bet on individual stocks.** In our large companies, stocks bought by their "
+                    "insiders did no better than the average of our stocks, or of their sector, in the same months "
+                    "(table: average return after a month with an insider purchase, since 2006). Research finds the "
+                    "effect in small companies, which are not in our universe. So insider purchases are shown here "
+                    "for information, and only the market-wide signal enters the portfolio.")
+        st.caption(f"Source: SEC Insider Transactions Data Sets (Form 4, open-market purchases and sales by officers "
+                   f"and directors), filings {pd.Timestamp(insider_meta['first_filing']):%B %Y} – "
+                   f"{pd.Timestamp(insider_meta['last_filing']):%B %Y}. Companies are matched by their SEC registration, "
+                   "including predecessors (e.g. Google Inc. before Alphabet). Foreign companies are exempt from Form 4, "
+                   f"so there is no insider data for {', '.join(insider_meta.get('no_filings', [])) or 'none'}. "
+                   "The market signal uses all US listed companies, including those that later disappeared, so it "
+                   "is free of the survivorship bias of our stock list.")
+
+with tabs[3], guarded("Backtest"):
     st.subheader(f"Backtest — {profile} profile with the client constraints")
     c1, _ = st.columns([1, 3])
     with c1.container(key="bt-rebalance"):
         freq = st.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
     try:
-        bt, ew, series = run_backtest(profile, cons_json, freq, confidence)
+        bt, ew, series = run_backtest(profile, cons_json, freq, view_source, confidence)
     except EXPECTED_ERRORS as exc:
         st.error(f"The backtest could not run: {exc}")
         bt = None
@@ -861,14 +1052,39 @@ with tabs[2], guarded("Backtest"):
         t1.caption("Turnover = buys + sells per year as a share of the portfolio (initial purchase excluded); "
                    "trading costs include the initial purchase.")
 
-with tabs[3], guarded("Simulation"):
+        if st.toggle("Compare the house views", key="bt.compare",
+                     help="The same backtest with each house view at its default confidence (it runs up to three "
+                          "more backtests the first time)."):
+            choices = {f"{INSIDER} ({ins.DEFAULT_CONFIDENCE:.0%})": (INSIDER, ins.DEFAULT_CONFIDENCE),
+                       f"{PAST} ({est.DEFAULT_VIEW_CONFIDENCE:.0%})": (PAST, est.DEFAULT_VIEW_CONFIDENCE),
+                       "No view (equilibrium only)": (PAST, 0.0)}
+            rows = {}
+            for name, (src, conf) in choices.items():
+                if src == INSIDER and signal is None:
+                    continue
+                bt_k = run_backtest(profile, cons_json, freq, src, conf)[0]
+                ok_k = bt_k.rebalances[bt_k.rebalances["status"] == "ok"]
+                rows[name] = {**risk.performance_metrics(bt_k.returns, rf),
+                              "ex_ante": ok_k["ex_ante_vol"].mean(), "turnover": btm.annual_turnover(bt_k)}
+            views_cmp = pd.DataFrame(rows).T.rename(columns={
+                "annual_return": "Annual return", "volatility": "Volatility", "sharpe": "Sharpe ratio",
+                "max_drawdown": "Max drawdown", "ex_ante": "Promised volatility", "turnover": "Turnover p.a."})
+            st.dataframe(views_cmp.style.format({"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}",
+                                                 "Max drawdown": "{:.1%}", "Promised volatility": "{:.2%}",
+                                                 "Turnover p.a.": "{:.0%}"}), width="stretch")
+            st.caption("Same profile, constraints, dates and trading costs: only the expected returns change. The "
+                       "past-performance view favours recent winners, and our stock list is made of today's winners, "
+                       "so its backtest gains are partly hindsight; it also takes more risk than promised. The insider "
+                       "view is measured on all US listed companies, including those that later disappeared.")
+
+with tabs[4], guarded("Simulation"):
     st.subheader(f"Wealth simulation — {profile} profile, starting with {usd(wealth)}")
     if require_ok(res):
         years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")
         loss_limit = prof.MAX_LOSS_LEVELS[answers["max_loss"]]
         try:
             sim, h_start, h_end, n_hist = simulate(profile, cons_json, st.session_state.get("bt.freq", "Quarterly"),
-                                                   confidence, years, float(wealth), loss_limit)
+                                                   view_source, confidence, years, float(wealth), loss_limit)
         except EXPECTED_ERRORS as exc:
             st.error(f"The simulation could not run: {exc}")
             sim = None

@@ -76,12 +76,14 @@ def test_backtest_benchmark_follows_the_profile():
 
 def test_app_defaults_match_the_engine_exactly():
     # untouched sliders must give the profile defaults exactly (e.g. EM <= 1/3, not 33%)
-    from src import backtest as btm, data, estimators as est, profiling as prof
+    # the default house view is the insider view at its default confidence
+    from src import backtest as btm, data, estimators as est, insiders as ins, profiling as prof
     uni, ret, rf = data.load_universe(), data.load_returns(), data.load_rf()
     dates = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly")
     e = btm.estimates_by_date(ret, rf, est.shrinkage_groups(uni), dates, benchmarks=data.load_benchmark_returns())
+    signal = ins.market_signal(data.load_insider_market())
     engine = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"),
-                              estimates=btm.with_view_confidence(e, est.DEFAULT_VIEW_CONFIDENCE))
+                              estimates=btm.with_insider_view(e, signal, ins.DEFAULT_CONFIDENCE))
     at = run_app()
     app_final = backtest_metrics(at).loc["Strategy", "Final wealth (USD)"] / 5_000_000
     assert np.isclose(app_final, (1 + engine.returns).prod(), rtol=1e-10)
@@ -89,12 +91,12 @@ def test_app_defaults_match_the_engine_exactly():
 
 def test_view_confidence_slider():
     at = run_app()
-    r10 = metric(at, "Expected return above T-bill")
-    at.slider(key="views").set_value(0)
+    r50 = metric(at, "Expected return above T-bill")
+    at.slider(key="views_insider").set_value(0)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
-    assert metric(at, "Expected return above T-bill") != r10
-    at.slider(key="views").set_value(25)
+    assert metric(at, "Expected return above T-bill") != r50
+    at.slider(key="views_insider").set_value(90)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
 
@@ -208,7 +210,7 @@ def test_wealth_extremes_scale_everything(wealth):
 def test_changes_propagate_no_stale_cache():
     at = run_app()
     r0, m0 = metric(at, "Expected return above T-bill"), backtest_metrics(at)
-    at.slider(key="Balanced.stock").set_value(3)
+    at.slider(key="Balanced.vol").set_value(8.0)   # the volatility budget always binds
     at.run(timeout=TIMEOUT)
     r1, m1, t1 = metric(at, "Expected return above T-bill"), backtest_metrics(at), backtest_trading(at)
     assert r1 != r0 and m1.loc["Strategy", "Annual return"] != m0.loc["Strategy", "Annual return"]
@@ -226,8 +228,9 @@ def test_bond_portfolio_section():
     years = float(labels["Average duration"].split()[0])
     assert 0 < years <= 5.0                                               # Conservative duration limit
     assert any("Share of bonds" in df.value.columns for df in at.dataframe)
-    at = run_app({("selectbox", "profile"): "Dynamic"})
-    # no bond floor and negative expected bond returns: Dynamic holds no bonds today
+    # past-performance view: no bond floor and negative expected bond returns since 2022, so the Dynamic
+    # profile holds no bonds today (with the insider view, bonds keep their positive equilibrium premium)
+    at = run_app({("selectbox", "profile"): "Dynamic", ("radio", "view_source"): "Past performance"})
     assert any("No bonds in this portfolio" in i.value for i in at.info)
 
 
@@ -333,7 +336,7 @@ def test_efficient_frontier_section():
     assert any(md.value == "### Efficient frontier" for md in at.markdown)
     assert any("capital market line" in c.value for c in at.caption)
     assert any("maximum-Sharpe (tangency) portfolio" in c.value for c in at.caption)
-    at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views"): 0})
+    at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views_insider"): 0})
     assert not at.exception and not at.error
 
 
@@ -349,3 +352,52 @@ def test_risk_contributions_section():
     at = run_app({("selectbox", "profile"): "Dynamic"})    # benchmark = 100% SPY, no bonds held
     assert not at.exception and not at.error
     assert any("SPY carries 100% of the risk" in c.value for c in at.caption)
+
+
+# --- house views: insider trading (default) and past performance ------------------------------
+
+def test_insider_signal_tab():
+    at = run_app()
+    assert not at.exception and not at.error
+    labels = {m.label for m in at.metric}
+    assert {"Insider buying breadth", "Signal", "Expected premium of equities over bonds",
+            "Equities in the portfolio"} <= labels
+    assert any("vs our stocks" in df.value.columns for df in at.dataframe)          # event study
+    assert any("Why we do not bet on individual stocks" in md.value for md in at.markdown)
+    assert any("insider view" in c.value for c in at.caption)                       # Portfolio caption
+
+
+def test_past_performance_view_still_works():
+    at = run_app({("radio", "view_source"): "Past performance"})
+    assert not at.exception and not at.error
+    assert any("recent average return as a view" in c.value for c in at.caption)
+    r10 = metric(at, "Expected return above T-bill")
+    at.slider(key="views").set_value(0)
+    at.run(timeout=TIMEOUT)
+    assert not at.exception and not at.error
+    assert metric(at, "Expected return above T-bill") != r10
+
+
+def test_compare_house_views():
+    at = run_app({("toggle", "bt.compare"): True})
+    assert not at.exception and not at.error
+    table = next(df.value for df in at.dataframe if "Promised volatility" in df.value.columns)
+    assert len(table) == 3 and table["Sharpe ratio"].notna().all()
+
+
+def test_missing_insider_data_falls_back(monkeypatch):
+    import streamlit as st
+    from src import data
+
+    def missing(*args, **kwargs):
+        raise data.DataError("Data file 'insider_market.parquet' not found. Run `python scripts/download_insiders.py`.")
+
+    st.cache_data.clear()
+    monkeypatch.setattr(data, "load_insider_market", missing)
+    try:
+        at = run_app()
+        assert not at.exception and not at.error
+        assert at.radio(key="view_source").options == ["Past performance"]
+        assert any("insider data is not available" in i.value for i in at.info)
+    finally:
+        st.cache_data.clear()
