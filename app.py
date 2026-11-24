@@ -11,7 +11,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, frontier as fr, optimizer as opt, profiling as prof, risk, team
+from src import (backtest as btm, benchmarks as bm, bonds, data, diversification as div, estimators as est,
+                 frontier as fr, optimizer as opt, profiling as prof, risk, team)
 
 st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -42,6 +43,14 @@ def guarded(section: str):
 
 def usd(x: float) -> str:
     return f"USD {x:,.0f}"
+
+
+def usd_short(x: float) -> str:
+    """Compact amount for metric tiles (the exact amount goes in tables and help texts)."""
+    for size, unit in ((1e9, "bn"), (1e6, "m"), (1e3, "k")):
+        if abs(x) >= size:
+            return f"USD {x / size:,.{2 if unit == 'bn' else 1 if unit == 'm' else 0}f}{unit}"
+    return usd(x)
 
 
 def pct(x: float, digits: int = 1) -> str:
@@ -120,12 +129,14 @@ def run_backtest(profile: str, cons_json: str, freq: str, confidence: float):
 
 @st.cache_data(show_spinner="Computing the efficient frontier...")
 def frontiers(profile: str, cons_json: str, confidence: float):
-    """Efficient frontier with the client's constraints and without them (long-only only)."""
+    """Efficient frontier with the client's constraints and without them (long-only only), and the
+    maximum-Sharpe (tangency) portfolio under the client's constraints."""
     e = est.with_view_confidence(get_estimates(), confidence)
     d = prof.problem_data(profile, e, load_data()[0])
     top = max(0.25, 1.6 * prof.SPECS[profile].max_volatility)
     cons = build_constraints(profile, json.loads(cons_json))
-    return fr.efficient_frontier(d, cons, max_vol=top), fr.efficient_frontier(d, [], max_vol=top)
+    front = fr.efficient_frontier(d, cons, max_vol=top)
+    return front, fr.efficient_frontier(d, [], max_vol=top), fr.max_sharpe_portfolio(d, cons, front)
 
 
 @st.cache_data(show_spinner="Simulating 5,000 wealth paths...")
@@ -377,7 +388,7 @@ with st.container(key="top-controls"):
         _about_dialog()
 
 st.title("Private Client Portfolio Optimizer")
-st.caption("Highest expected return within the client's risk budget. All figures in USD.")
+st.caption("Highest expected return within the client's volatility budget. All figures in USD.")
 
 with st.container(key="main-nav"):
     tabs = st.tabs(["Client Profile", "Portfolio", "Backtest", "Simulation"])
@@ -475,7 +486,7 @@ with tabs[1], guarded("Portfolio"):
             c = defaults[key]
             with column.container(border=True):
                 if mandatory:
-                    st.markdown(f"**{c.name}** (risk budget of the profile)")
+                    st.markdown(f"**{c.name}** (volatility budget of the profile)")
                     active = True
                 else:
                     active = st.toggle(c.name, value=True, key=k(f"{key}.on"))
@@ -483,7 +494,7 @@ with tabs[1], guarded("Portfolio"):
                 cons_spec[key] = {"active": active, "params": params}
                 st.caption(c.describe(params))
 
-        st.markdown("##### Risk budget")
+        st.markdown("##### Volatility budget and asset mix")
         col_a, col_b = st.columns(2, gap="large")
         card("max_volatility", col_a, lambda off: {"limit": pct_slider(
             "Max expected volatility", spec_p.max_volatility, 2, 25, 0.5, k("vol"), off)}, mandatory=True)
@@ -573,7 +584,7 @@ with tabs[1], guarded("Portfolio"):
 
             st.markdown("### Efficient frontier")
             try:
-                front, free = frontiers(profile, cons_json, confidence)
+                front, free, tangency = frontiers(profile, cons_json, confidence)
             except EXPECTED_ERRORS as exc:
                 st.error(f"The efficient frontier could not be computed: {exc}")
                 front = None
@@ -581,12 +592,24 @@ with tabs[1], guarded("Portfolio"):
                 cap = cons_spec["max_volatility"]["params"]["limit"]
                 free_at_cap = float(np.interp(res.volatility, free["volatility"], free["expected_return"]))
                 cost_bps = max(free_at_cap - res.expected_return, 0.0) * 1e4
+                gmv = front.iloc[0]  # the curve starts at the minimum-variance portfolio
+                # capital market line from the T-bill (origin) through the tangency point, kept inside the plotted range
+                top_ret = max(front["expected_return"].max(), free["expected_return"].max())
+                cml_x = np.array([0.0, min(front["volatility"].max(), top_ret / max(tangency["sharpe"], 1e-9))])
                 f1, f2 = st.columns([3, 2], gap="large")
                 f = go.Figure([
                     go.Scatter(x=free["volatility"] * 100, y=free["expected_return"] * 100, name="Without client constraints",
                                line=dict(color=GREY, width=2, dash="dash")),
                     go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
                                name="With your constraints", line=dict(color=NAVY, width=3)),
+                    go.Scatter(x=cml_x * 100, y=cml_x * tangency["sharpe"] * 100, name="Capital market line",
+                               line=dict(color="#c9a227", width=1.5, dash="dot")),
+                    go.Scatter(x=[gmv["volatility"] * 100], y=[gmv["expected_return"] * 100], name="Minimum variance",
+                               mode="markers", marker=dict(color="white", size=11, symbol="circle",
+                                                           line=dict(color=NAVY, width=2))),
+                    go.Scatter(x=[tangency["volatility"] * 100], y=[tangency["expected_return"] * 100],
+                               name="Maximum Sharpe (tangency)", mode="markers",
+                               marker=dict(color="#c9a227", size=13, symbol="triangle-up", line=dict(color="white", width=1))),
                     go.Scatter(x=[bench_stats["volatility"] * 100], y=[bench_stats["expected_return"] * 100],
                                name=bench_label(profile), mode="markers",
                                marker=dict(color=GREY, size=13, symbol="diamond", line=dict(color="white", width=1))),
@@ -595,7 +618,7 @@ with tabs[1], guarded("Portfolio"):
                     go.Scatter(x=[res.volatility * 100], y=[res.expected_return * 100], name="Recommended portfolio",
                                mode="markers", marker=dict(color=NAVY, size=18, symbol="star", line=dict(color="white", width=1)))])
                 f.add_vline(x=cap * 100, line=dict(color=NAVY, width=1, dash="dot"),
-                            annotation_text=f"Risk budget {cap:.0%}", annotation_position="top left")
+                            annotation_text=f"Volatility budget {cap:.0%}", annotation_position="top left")
                 f.update_layout(title="Best expected return for each level of risk", xaxis_title="Expected volatility (% p.a.)",
                                 yaxis_title="Expected return above T-bill (% p.a.)")
                 f1.plotly_chart(fig_layout(f, 430), width="stretch")
@@ -607,7 +630,7 @@ with tabs[1], guarded("Portfolio"):
                                 yaxis_title="% of portfolio", yaxis_range=[0, 100])
                 f2.plotly_chart(fig_layout(g, 430), width="stretch")
                 st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
-                           f"risk. The recommended portfolio (star) is the point at the risk budget. At this risk, "
+                           f"risk. The recommended portfolio (star) is the point at the volatility budget. At this risk, "
                            f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
                            "year: that is what diversification limits, the bond floor and the other rules cost on these "
                            "estimates, in exchange for a sturdier portfolio. Without constraints the curve starts at cash "
@@ -615,6 +638,23 @@ with tabs[1], guarded("Portfolio"):
                            "the capital market line. The benchmark and SPY sit below the curve: "
                            "for the same estimated risk, an optimised mix of the universe expects more (before "
                            "estimation error; see the Backtest tab).")
+                gap = res.volatility - tangency["volatility"]
+                if abs(gap) < 0.002 or tangency["sharpe"] - res.sharpe < 0.005:
+                    where = (f"Your portfolio is practically the maximum-Sharpe portfolio (Sharpe ratio {res.sharpe:.2f}): "
+                             "at this volatility budget, no constrained mix offers a better trade-off.")
+                elif gap > 0:
+                    where = (f"Your portfolio sits to its right (Sharpe ratio {res.sharpe:.2f}): the extra expected return "
+                             "is bought with proportionally more risk, the price of a higher return target without borrowing.")
+                else:
+                    where = (f"Your portfolio sits to its left (Sharpe ratio {res.sharpe:.2f}): the volatility budget is below "
+                             "the risk of the maximum-Sharpe portfolio, so some of the best trade-off is given up for safety.")
+                st.caption(f"Special points of your curve. The circle is the "
+                           f"minimum-variance portfolio, the least risk your constraints allow ({pct(gmv['volatility'])} "
+                           f"volatility). The triangle is the maximum-Sharpe (tangency) portfolio: Sharpe ratio "
+                           f"{tangency['sharpe']:.2f} at {pct(tangency['volatility'])} volatility, with "
+                           f"{pct(tangency['Equity'], 0)} in equities. The dotted capital market line starts at the T-bill "
+                           f"(the origin, since returns are measured above it) and touches the curve there: its slope is "
+                           f"the best Sharpe ratio available. {where}")
 
         with sub_alloc:
             b_eq = spec_p.benchmark_equity
@@ -630,6 +670,57 @@ with tabs[1], guarded("Portfolio"):
             em = w[is_eq & uni["is_EM"]].sum()
             st.markdown(f"**Emerging markets:** {pct(em)} of the portfolio, {pct(em / max(w[is_eq].sum(), 1e-12))} of equities. "
                         f"**Cash:** {pct(w[uni['asset_class'] == 'Cash'].sum())}. **Positions above 0.5%:** {(w > 0.005).sum()}.")
+
+            st.markdown("### Where the risk comes from")
+            if res.volatility <= 1e-6:
+                st.info("This portfolio carries no market risk, so there is no risk to split.")
+            else:
+                e0 = get_estimates()  # covariances do not depend on the view confidence
+                rc = div.risk_contributions(w, e0.cov)
+                by_cls = div.by_group(rc, uni["asset_class"]).reindex(CLASS_ORDER).fillna(0.0)
+                by_cls.index = by_cls.index.map(CLASS_LABELS)
+                b_w = pd.Series({bm.EQUITY_LEG: b_eq, bm.BOND_LEG: 1 - b_eq})
+                b_rc = div.risk_contributions(b_w, e0.joint_cov)
+                dm, dm_b = div.diversification_measures(w, e0.cov), div.diversification_measures(b_w, e0.joint_cov)
+                money, risk_ = "Share of the money", "Share of the risk"
+                r1, r2 = st.columns(2, gap="large")
+                f = go.Figure([go.Bar(name=money, x=by_cls.index, y=by_cls["weight"] * 100, marker_color=GREY),
+                               go.Bar(name=risk_, x=by_cls.index, y=by_cls["relative"] * 100, marker_color=NAVY)])
+                f.update_layout(barmode="group", title="Money vs risk by asset class", yaxis_title="%")
+                r1.plotly_chart(fig_layout(f, 420), width="stretch")
+                top = rc.nlargest(div.TOP_N, "relative").iloc[::-1]
+                names_ = [label(t) for t in top.index]
+                f = go.Figure([go.Bar(name=money, y=names_, x=top["weight"] * 100, orientation="h", marker_color=GREY),
+                               go.Bar(name=risk_, y=names_, x=top["relative"] * 100, orientation="h", marker_color=NAVY)])
+                f.update_layout(barmode="group", title=f"The {div.TOP_N} largest risk contributors", xaxis_title="%")
+                r2.plotly_chart(fig_layout(f, 420), width="stretch")
+                c = st.columns(5)
+                c[0].metric("Effective number of positions", f"{dm['effective_n']:.1f}",
+                            help=f"1 / Herfindahl index. The Herfindahl index is the sum of the squared weights "
+                                 f"({dm['herfindahl']:.3f} here; 1 = a single position). Its inverse is the number of "
+                                 "equal positions that would be as concentrated as this portfolio.")
+                c[1].metric("Effective number (entropy)", f"{dm['entropy_n']:.1f}",
+                            help="exp(Shannon entropy of the weights), with entropy = -sum of w x ln(w): another count of "
+                                 "equivalent equal positions, less driven by the largest ones.")
+                c[2].metric("Gini coefficient", f"{dm['gini']:.2f}",
+                            help=f"From the Lorenz curve of the weights over the {len(w)} eligible assets: 0 = the same "
+                                 "weight in every asset, close to 1 = everything in one.")
+                c[3].metric("Diversification ratio", f"{dm['diversification_ratio']:.2f}",
+                            f"{dm['diversification_ratio'] - dm_b['diversification_ratio']:+.2f} vs benchmark",
+                            help="Weighted average volatility of the holdings divided by the portfolio's volatility. "
+                                 "1 = no diversification benefit; the higher, the more of the holdings' risks cancel out. "
+                                 "The most diversified portfolio is the one that maximises it.")
+                c[4].metric(f"Risk from the top {div.TOP_N}", pct(dm["top10_risk_share"], 0),
+                            help=f"Share of the portfolio's volatility that comes from its {div.TOP_N} largest risk contributors.")
+                spy_risk = b_rc.loc[bm.EQUITY_LEG, "relative"]
+                st.caption(f"Risk contributions split the portfolio's volatility ({pct(res.volatility)}) among the holdings: "
+                           "each position's weight times its marginal risk, i.e. how much the volatility rises when the "
+                           "position grows a little. They add up exactly to the total (Euler's theorem), so the shares sum "
+                           "to 100%; a negative share means the asset offsets the others. Equities are "
+                           f"{pct(by_cls.loc['Equities', 'weight'], 0)} of the money but "
+                           f"{pct(by_cls.loc['Equities', 'relative'], 0)} of the risk. In the benchmark "
+                           f"({bench_label(profile).removeprefix('Benchmark (')}, SPY carries {pct(spy_risk, 0)} of the risk "
+                           f"with {pct(b_eq, 0)} of the money.")
 
         with sub_bonds:
             bs = bonds.sleeve_summary(w, universe)
@@ -784,37 +875,55 @@ with tabs[3], guarded("Simulation"):
         if sim is not None:
             year_col = f"Loss above {loss_limit:.0%} in a given year"
             dd_col, dd_bad_col = "Worst fall, typical", "Worst fall, bad case (5%)"
+            var_col, es_col = "1-year VaR (95%)", "1-year expected shortfall (95%)"
             rows = {name: {"Median": v["median"], "Pessimistic (5%)": v["p5"], "Optimistic (95%)": v["p95"],
-                           year_col: v["prob_year_loss"], dd_col: v["dd_median"], dd_bad_col: v["dd_p5"]}
+                           year_col: v["prob_year_loss"], dd_col: v["dd_median"], dd_bad_col: v["dd_p5"],
+                           var_col: v["year_var95"], es_col: v["year_es95"]}
                     for name, v in sim.items()}
             table = pd.DataFrame(rows).T.rename(index={"Portfolio": "Recommended portfolio",
                                                        "Benchmark": bench_label(profile)})
             p_, b_ = sim["Portfolio"], sim["Benchmark"]
-            c = st.columns(4)
-            c[0].metric(f"Median wealth in {years} years", usd(p_["median"]),
-                        f"{usd(p_['median'] - b_['median'])} vs benchmark")
-            c[1].metric("Pessimistic scenario (5%)", usd(p_["p5"]))
+            c = st.columns(3) + st.columns(3)  # wealth on the first row, risk on the second
+            gain = p_["median"] - b_["median"]
+            c[0].metric(f"Median wealth in {years} years", usd_short(p_["median"]),
+                        f"{'+' if gain >= 0 else '-'}{usd_short(abs(gain))} vs benchmark",
+                        help=f"{usd(p_['median'])}; benchmark {usd(b_['median'])}.")
+            c[1].metric("Pessimistic scenario (5%)", usd_short(p_["p5"]), help=f"{usd(p_['p5'])}.")
+            c[2].metric("Optimistic scenario (95%)", usd_short(p_["p95"]), help=f"{usd(p_['p95'])}.")
             def vs_bench(diff_pp: float, digits: int, color: str) -> dict:
                 """Delta text and color; a difference that rounds to zero is shown neutrally."""
                 if round(diff_pp, digits) == 0:
                     return {"delta": "same as benchmark", "delta_color": "off"}
                 return {"delta": f"{diff_pp:+.{digits}f} pp vs benchmark", "delta_color": color}
 
-            c[2].metric(f"Chance of a loss above {loss_limit:.0%} in a year", pct(p_["prob_year_loss"]),
+            c[3].metric(f"Chance of a loss above {loss_limit:.0%} in a year", pct(p_["prob_year_loss"]),
                         **vs_bench((p_["prob_year_loss"] - b_["prob_year_loss"]) * 100, 1, "inverse"),
                         help=f"Your answer in the questionnaire: a one-year loss of at most {loss_limit:.0%}. "
                              "Share of simulated years that lose more than that.")
-            c[3].metric(f"Worst fall within {years} years (typical)", pct(p_["dd_median"], 0),
+            c[4].metric(f"Worst fall within {years} years (typical)", pct(p_["dd_median"], 0),
                         **vs_bench((p_["dd_median"] - b_["dd_median"]) * 100, 0, "normal"),
                         help=f"Largest fall from a previous peak during the {years} years, in a typical scenario "
                              f"(median). In a bad scenario (5% worst): {pct(p_['dd_p5'], 0)}.")
-            st.dataframe(table.style.format({"Median": lambda x: usd(x), "Pessimistic (5%)": lambda x: usd(x),
-                                             "Optimistic (95%)": lambda x: usd(x), year_col: "{:.1%}",
-                                             dd_col: "{:.0%}", dd_bad_col: "{:.0%}"}), width="stretch")
+            c[5].metric("Average of the worst 5% of years", pct(p_["year_es95"]),
+                        **vs_bench((p_["year_es95"] - b_["year_es95"]) * 100, 1, "normal"),
+                        help="Expected shortfall (CVaR) at 95%: the average one-year return in the 5% worst simulated "
+                             f"years, a {'loss' if p_['year_es95'] < 0 else 'gain'} of about "
+                             f"{usd(abs(p_['year_es95']) * wealth)} on your wealth. The 95% value at risk, "
+                             f"the threshold of those years, is {pct(p_['year_var95'])}.")
+            money_cols = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
+            st.markdown(f"**Wealth in {years} years**")
+            st.dataframe(table[money_cols].style.format({k: lambda x: usd(x) for k in money_cols}), width="stretch")
+            st.markdown("**Risk along the way**")
+            st.dataframe(table.drop(columns=money_cols).style.format(
+                {year_col: "{:.1%}", dd_col: "{:.0%}", dd_bad_col: "{:.0%}", var_col: "{:.1%}", es_col: "{:.1%}"}),
+                width="stretch")
             st.caption(f"Loss in a given year: share of simulated years losing more than {loss_limit:.0%}, the "
                        "largest one-year loss you said you could accept in the questionnaire. Worst fall: the "
                        "largest drop from a previous peak during the horizon, in a typical scenario and in the "
-                       "5% worst scenarios.")
+                       "5% worst scenarios. VaR (value at risk, 95%): the one-year return that 95% of the simulated "
+                       "years beat. Expected shortfall (95%): the average return of the 5% worst years, i.e. how bad "
+                       "those years are on average. Expected shortfall is a coherent risk measure (combining two "
+                       "portfolios never shows more risk than the two separately); VaR is not.")
             f = go.Figure()
             for name, clr, fill in (("Benchmark", GREY, "rgba(163,173,184,0.25)"), ("Portfolio", NAVY, "rgba(31,59,87,0.20)")):
                 b = sim[name]["bands"]

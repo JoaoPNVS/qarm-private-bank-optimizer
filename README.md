@@ -3,19 +3,19 @@
 A Streamlit web app built for the course *Quantitative Asset and Risk Management II* at
 HEC Lausanne. We play the role of an **international private bank** advising clients whose
 reference currency is the **US dollar**: the app profiles the client, builds the portfolio with
-the highest expected return within the client's risk budget and constraints, backtests the
+the highest expected return within the client's volatility budget and constraints, backtests the
 strategy and simulates the client's future wealth.
 
 ## The app
 
 | Tab | What it shows |
 |---|---|
-| Client Profile | 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
-| Constraints | every client constraint with a toggle and a slider, preset to the profile; conflicting constraints are named when the portfolio is impossible |
-| Portfolio | recommended weights, expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints (and the return they cost), allocation by asset class and sector, bond portfolio (segments, duration, rating), trading cost per asset |
+| Client Profile | client settings (wealth, profile override, view confidence) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
+| Portfolio | every client constraint with a toggle and a slider (in the "Adjust constraints" panel), preset to the profile; conflicting constraints are named when the portfolio is impossible. Sub-tabs: *Overview* (expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints and the return they cost, minimum-variance and maximum-Sharpe portfolios, capital market line), *Allocation* (by asset class and sector, where the risk comes from: risk contributions and diversification measures), *Bonds* (segments, duration, rating), *Holdings* (weights in USD, trading cost per asset, binding constraints) |
 | Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; promised vs realised volatility; allocation over time |
-| Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark |
-| About Us | the project and the team |
+| Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark: range of outcomes, loss beyond the client's limit, worst fall, one-year VaR and expected shortfall |
+
+The "About Us" button (top right) presents the project and the team.
 
 ## Methodology
 
@@ -30,7 +30,7 @@ strategy and simulates the client's future wealth.
   optimisation, `pi = delta x Cov(asset, market)` with a 60% SPY / 40% AGG market portfolio and
   delta = 2.5. Views = each asset's 60-month average return, with He & Litterman's uncertainty
   `Omega = diag(tau Sigma) (1 - c) / c` (tau = 0.05), where c is the "confidence in past
-  performance" set in the sidebar (default 10%, 0% = pure equilibrium). Backtest 2012–2026,
+  performance" set in the client settings (default 10%, 0% = pure equilibrium). Backtest 2012–2026,
   Balanced: Sharpe 1.15 against 0.97 with the previous method (historical means shrunk toward
   group averages, kept in `src/estimators.py` for comparison), realised volatility 11.1% against
   12.7% for a 10% budget, maximum drawdown −22% against −26%.
@@ -48,7 +48,13 @@ strategy and simulates the client's future wealth.
 - **Simulation.** 5,000 paths built from random 12-month blocks of the strategy's out-of-sample
   backtest returns (2012–2026, each portfolio chosen with past data only, costs deducted), the
   benchmark on the same blocks. Risk shown as the chance of a one-year loss above the limit the
-  client stated in the questionnaire, and the worst fall from a peak (typical and 5% worst case).
+  client stated in the questionnaire, the worst fall from a peak (typical and 5% worst case), and
+  the one-year value at risk and expected shortfall (CVaR) at 95%.
+- **Risk analysis.** Risk contributions by asset and asset class (Euler decomposition of the
+  volatility: marginal, absolute and relative contributions), compared with the benchmark;
+  diversification measures (Herfindahl index and effective number of positions, Shannon entropy,
+  Gini coefficient, diversification ratio). On the efficient frontier: the minimum-variance and
+  maximum-Sharpe (tangency) portfolios under the client's constraints and the capital market line.
 
 ## Data
 
@@ -111,7 +117,7 @@ choose **Python 3.12**. No secrets are needed.
 
 ```
 app.py                 Streamlit UI
-src/                   data, estimators, optimizer, frontier, benchmarks, bonds, backtest, risk, profiling, team
+src/                   data, estimators, optimizer, frontier, diversification, benchmarks, bonds, backtest, risk, profiling, team
 scripts/               one-off data download (universe snapshot, prices, costs)
 data/                  committed data files and team.json
 assets/team/           team photos

@@ -92,7 +92,7 @@ class Constraint:
 # Kept deliberately simple so each one can be explained to the client in one sentence.
 
 def max_volatility(limit: float = 0.10) -> Constraint:
-    """The risk budget of the profile. Mandatory: without it the problem would put everything
+    """The volatility budget of the profile. Mandatory: without it the problem would put everything
     in the single asset with the highest expected return."""
     return Constraint(
         VOL_KEY, "Maximum volatility", {"limit": limit},
@@ -350,7 +350,7 @@ def diagnose_infeasibility(data: ProblemData, constraints: list[Constraint]) -> 
 
 def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = True) -> OptimizationResult:
     if not any(c.key == VOL_KEY and c.active for c in constraints):
-        return OptimizationResult("invalid", message="A maximum volatility (the profile's risk budget) is required.")
+        return OptimizationResult("invalid", message="A maximum volatility (the profile's volatility budget) is required.")
     w = cp.Variable(len(data.tickers))
     pairs = _build_all(w, data, constraints)
     problem = cp.Problem(cp.Maximize(_objective(w, data)), _base(w) + [p.constraint for _, p in pairs])

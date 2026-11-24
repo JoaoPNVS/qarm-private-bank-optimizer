@@ -8,7 +8,7 @@ from streamlit.testing.v1 import AppTest
 pytestmark = pytest.mark.slow
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app.py")
-TIMEOUT = 180
+TIMEOUT = 300   # a new profile or constraint re-runs the backtest (slow machines: minutes)
 
 
 def run_app(widgets: dict | None = None) -> AppTest:
@@ -198,7 +198,7 @@ def test_holdings_consistent_with_wealth():
 def test_wealth_extremes_scale_everything(wealth):
     at = run_app()
     base = backtest_metrics(at)["Final wealth (USD)"] / 5_000_000
-    at.sidebar.number_input[0].set_value(wealth)
+    at.number_input[0].set_value(wealth)   # client wealth (Client settings)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
     assert np.allclose(backtest_metrics(at)["Final wealth (USD)"] / wealth, base)
@@ -242,7 +242,9 @@ def test_backtest_shows_equal_weight_and_how_to_read():
 
 
 def sim_table(at):
-    return next(df.value for df in at.dataframe if "Optimistic (95%)" in df.value.columns)
+    """The simulation's two tables (wealth, then risk measures) joined by row."""
+    money = next(df.value for df in at.dataframe if "Optimistic (95%)" in df.value.columns)
+    return money.join(next(df.value for df in at.dataframe if "1-year VaR (95%)" in df.value.columns))
 
 
 def test_simulation_tab():
@@ -256,22 +258,29 @@ def test_simulation_tab():
     assert (sim["Pessimistic (5%)"] < sim["Median"]).all() and (sim["Median"] < sim["Optimistic (95%)"]).all()
     assert sim["Loss above 10% in a given year"].between(0, 1).all()
     assert (sim["Worst fall, bad case (5%)"] <= sim["Worst fall, typical"]).all() and (sim["Worst fall, typical"] < 0).all()
+    assert (sim["1-year expected shortfall (95%)"] <= sim["1-year VaR (95%)"]).all()
+    assert "Average of the worst 5% of years" in labels
     at.slider(key="sim.years").set_value(20)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
     assert "Median wealth in 20 years" in {m.label for m in at.metric}
     sim20 = sim_table(at)
-    at.sidebar.number_input[0].set_value(1_000_000)
+    at.number_input[0].set_value(1_000_000)
     at.run(timeout=TIMEOUT)
     sim20_1m = sim_table(at)
     money = ["Median", "Pessimistic (5%)", "Optimistic (95%)"]
     assert np.allclose(sim20_1m[money], sim20[money] / 5)  # same scenarios, wealth scales linearly
-    probs = ["Loss above 10% in a given year", "Worst fall, typical", "Worst fall, bad case (5%)"]
+    probs = ["Loss above 10% in a given year", "Worst fall, typical", "Worst fall, bad case (5%)",
+             "1-year VaR (95%)", "1-year expected shortfall (95%)"]
     assert np.allclose(sim20_1m[probs].astype(float), sim20[probs].astype(float))
 
 
 def test_simulation_follows_the_stated_loss_limit():
-    at = run_app({("radio", "q.max_loss"): 0})  # "5%"
+    at = run_app()
+    at.button(key="btn.max_loss").click()   # the questionnaire is an accordion: open the question first
+    at.run(timeout=TIMEOUT)
+    at.radio(key="q.max_loss").set_value(0)  # "5%"
+    at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
     assert "Chance of a loss above 5% in a year" in {m.label for m in at.metric}
 
@@ -280,13 +289,19 @@ def about_names(at):
     return [md.value for md in at.markdown if "font-weight:600;font-size:1.1rem" in md.value]
 
 
+def open_about(at):
+    """About Us is a dialog opened by the top-right button."""
+    at.button(key="btn-about").click()
+    return at.run(timeout=TIMEOUT)
+
+
 def test_about_us_without_photos():
-    at = run_app()
+    at = open_about(run_app())
     assert not at.exception and not at.error
     cards = about_names(at)
-    assert len(cards) == 6 and any("Joao [NOM]" in c for c in cards)
+    assert len(cards) == 5 and any("Joao Neves" in c for c in cards)
     avatars = [md.value for md in at.markdown if "border-radius:50%" in md.value]
-    assert len(avatars) == 6 and all("<div" in a for a in avatars)  # initials avatars, no broken image
+    assert len(avatars) == 5 and all("<div" in a for a in avatars)  # initials avatars, no broken image
 
 
 def test_about_us_with_a_photo(tmp_path, monkeypatch):
@@ -303,7 +318,7 @@ def test_about_us_with_a_photo(tmp_path, monkeypatch):
                              encoding="utf-8")
         monkeypatch.setattr(team, "TEAM_FILE", test_file)
         monkeypatch.setattr(team.load_team, "__defaults__", (test_file,))
-        at = run_app()
+        at = open_about(run_app())
         assert not at.exception and not at.error
         avatars = [md.value for md in at.markdown if "border-radius:50%" in md.value]
         assert sum("<img" in a for a in avatars) == 1 and sum("<div" in a for a in avatars) == 1
@@ -317,5 +332,20 @@ def test_efficient_frontier_section():
     assert not at.exception and not at.error
     assert any(md.value == "### Efficient frontier" for md in at.markdown)
     assert any("capital market line" in c.value for c in at.caption)
+    assert any("maximum-Sharpe (tangency) portfolio" in c.value for c in at.caption)
     at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views"): 0})
     assert not at.exception and not at.error
+
+
+def test_risk_contributions_section():
+    at = run_app()
+    assert not at.exception and not at.error
+    assert any(md.value == "### Where the risk comes from" for md in at.markdown)
+    labels = {m.label: m.value for m in at.metric}
+    assert {"Effective number of positions", "Effective number (entropy)", "Gini coefficient",
+            "Diversification ratio", "Risk from the top 10"} <= set(labels)
+    assert float(labels["Diversification ratio"]) > 1
+    assert any("Euler's theorem" in c.value for c in at.caption)
+    at = run_app({("selectbox", "profile"): "Dynamic"})    # benchmark = 100% SPY, no bonds held
+    assert not at.exception and not at.error
+    assert any("SPY carries 100% of the risk" in c.value for c in at.caption)

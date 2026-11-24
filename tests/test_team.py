@@ -6,9 +6,9 @@ from src import team
 PNG_1PX = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
 
 
-def test_team_file_lists_six_members():
+def test_team_file_lists_five_members():
     members, repo, error = team.load_team()
-    assert error is None and len(members) == 6
+    assert error is None and len(members) == 5
     assert all(m.name and m.role and m.description for m in members)
     assert not any("@" in (m.description + m.linkedin + repo) for m in members)  # no e-mail addresses
 

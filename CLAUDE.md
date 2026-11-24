@@ -4,7 +4,7 @@
 A Streamlit web app for the HEC Lausanne course *Quantitative Asset and Risk Management II*.
 We act as an **international private bank**. Our clients are international private clients
 whose reference currency is the **USD**. The app profiles the client, builds the portfolio with
-the highest expected return within the client's risk budget and constraints, backtests the
+the highest expected return within the client's volatility budget and constraints, backtests the
 strategy and simulates the client's wealth.
 
 Grading criteria (from the professor) — every feature should serve one of these:
@@ -27,8 +27,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
   (<1.75 Conservative, <2.50 Balanced, <3.25 Growth, otherwise Dynamic); the profile is the
   LOWER of the two; knowledge caps it ("none" -> at most Balanced, "basic" -> at most Growth);
   a horizon below 3 years always gives Conservative.
-- Each profile sets a **volatility cap** (risk budget) and a **floor on bond funds** (cash does
-  not count):
+- Each profile sets a **volatility cap** (volatility budget) and a **floor on bond funds** (cash does
+  not count). Wording: say "volatility budget", not "risk budget": in the course, risk budgeting
+  means splitting risk contributions across assets (shown in the Portfolio tab), a different idea.
 
   | Profile      | Vol cap | Bond floor         | Benchmark (SPY / USD bonds) |
   |--------------|--------:|-------------------:|-----------------------------|
@@ -45,7 +46,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   counted, the 2021-2026 window (bonds lost money against T-bills) filled every floor with cash.
 
 ## Client constraints (`src/optimizer.py`; simple, explainable, all editable in the app)
-- Maximum volatility = the profile's risk budget (mandatory).
+- Maximum volatility = the profile's volatility budget (mandatory).
 - Minimum share in bond funds = the profile's floor (active by default, can be changed).
 - Maximum cash & equivalents: 10% (CASH_USD + BIL + FLOT; active by default, can be changed).
 - Max weight per single stock: 8%; per bond ETF: 15%; per other ETF (equity funds, gold): 20%.
@@ -118,7 +119,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   `src/estimators.py`). Prior = equilibrium returns by reverse optimisation,
   pi = delta Cov(asset, market) with market = 60% SPY / 40% AGG and delta = 2.5. Views = every
   asset's 60-month historical mean (P = identity), Omega = diag(tau Sigma) (1 - c) / c with
-  tau = 0.05 (He & Litterman). c = "confidence in past performance", a sidebar slider 0-25%,
+  tau = 0.05 (He & Litterman). c = "confidence in past performance", a slider 0-25% (Client settings),
   default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
   typical asset moves about a third of the way to its historical mean, SPY most of the way.
   Backtest 2012-2026, Balanced: Sharpe 1.15 (old method 0.97, equal weight 1.16), realised
@@ -160,34 +161,56 @@ Grading criteria (from the professor) — every feature should serve one of thes
   adds. Shown in every backtest table and chart, with a plain-language "How to read these
   results" box for the client.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
-  fixed seed) of the client's wealth over 5-20 years, starting from the sidebar wealth. History =
+  fixed seed) of the client's wealth over 5-20 years, starting from the client wealth. History =
   the strategy's OUT-OF-SAMPLE backtest returns (2012-2026: each quarter's portfolio chosen with
   the previous 60 months only, trading costs deducted) and the profile benchmark on the SAME
   months; both are resampled with the same blocks. (Replaying today's weights on the months used
   to choose them was in-sample: Balanced median $52m from $5m in 10 years, 0% chance of loss.)
   Shown: median, 5% and 95% outcomes; the chance of a one-year loss above the limit the client
   stated in the questionnaire (5 / 10 / 20 / 30%); the worst fall from a peak during the horizon,
-  typical (median) and bad case (5%); for the portfolio and the benchmark. The simulation
-  inherits the survivorship bias (stated in the app).
+  typical (median) and bad case (5%); one-year value at risk and expected shortfall (CVaR) at 95%
+  on the simulated one-year returns (expected shortfall is coherent, VaR is not); for the portfolio
+  and the benchmark. The simulation inherits the survivorship bias (stated in the app).
+- **Risk contributions and diversification** (`src/diversification.py`, ex ante, Portfolio tab):
+  Euler decomposition of the volatility, MR_i = (Sigma w)_i / sigma, RC_i = w_i MR_i, RC*_i =
+  RC_i / sigma (they add up exactly to sigma; tested against the course's 3-asset risk-budgeting
+  example), by asset class and for the 10 largest contributors, compared with the benchmark
+  (SPY carries most of a 60/40's risk). Diversification measures: Herfindahl index and its
+  inverse (effective number of positions), exp(Shannon entropy), Gini coefficient of the weights
+  over the eligible assets, diversification ratio sum(w_i sigma_i) / sigma (vs benchmark), share
+  of risk from the top 10. Reporting only: the strategy does not target risk contributions (no
+  ERC; that was the previous group's project).
+- **Special frontier points** (`src/frontier.py`): minimum-variance portfolio (left end of the
+  constrained curve) and maximum-Sharpe (tangency) portfolio under the client's constraints, found
+  by golden-section search on the volatility cap (the Sharpe ratio along a concave frontier has one
+  peak); capital market line from the T-bill (origin, returns are in excess) through it.
 
-## App (`app.py`, six tabs)
-1. **Client Profile** — questionnaire and resulting profile, with the reasons.
-2. **Constraints** — each constraint with its toggle/slider, preset to the profile defaults;
-   clear message naming the conflicting constraints when infeasible.
-3. **Portfolio** — ex-ante return / volatility / Sharpe vs benchmark and SPY; **efficient frontier**
-   (`src/frontier.py`) with and without the client's constraints, the benchmark and SPY marked, the
-   allocation along the curve and the return the constraints cost at the client's risk; allocation by asset
-   class and equity sector, holdings; **Bond portfolio** section: share of bonds, average
-   duration and rating, investment-grade and high-yield shares, breakdown by issuer type,
-   maturity bucket and credit quality, table of bond funds (`src/bonds.py`).
-4. **Backtest** — cumulative performance vs SPY and profile benchmark, metrics table,
-   ex-ante vs realised volatility.
-5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
-   stated limit and worst fall, vs benchmark.
-6. **About Us** — short project presentation and one card per team member. Team data lives in ONE
-   editable file, `data/team.json` (name, role, description, photo path, LinkedIn; optional
-   `repository` link). Photos go in `assets/team/`; a missing photo shows a round avatar with the
-   initials (`src/team.py`). No e-mail addresses. Own texts and style, nothing from reference/.
+## App (`app.py`, dark UI: four tabs in a floating bottom navigation, no sidebar)
+1. **Client Profile** — "Client settings" box (wealth, profile override, view confidence; these
+   inputs drive every tab), the questionnaire as an accordion, and the resulting profile with the
+   reasons.
+2. **Portfolio** — "Adjust constraints" expander (each constraint with its toggle/slider, preset to
+   the profile defaults; clear message naming the conflicting constraints when infeasible) and four
+   sub-tabs:
+   - *Overview*: ex-ante return / volatility / Sharpe vs benchmark and SPY; **efficient frontier**
+     (`src/frontier.py`) with and without the client's constraints, the benchmark and SPY marked,
+     the minimum-variance and maximum-Sharpe portfolios and the capital market line, the allocation
+     along the curve and the return the constraints cost at the client's risk;
+   - *Allocation*: by asset class and equity sector; **Where the risk comes from**: money vs risk
+     share by asset class, the 10 largest risk contributors, diversification measures
+     (`src/diversification.py`);
+   - *Bonds*: share of bonds, average duration and rating, investment-grade and high-yield shares,
+     breakdown by issuer type, maturity bucket and credit quality, table of bond funds (`src/bonds.py`);
+   - *Holdings*: holdings chart, full allocation in USD, binding constraints.
+3. **Backtest** — cumulative performance vs SPY and profile benchmark, ex-ante vs realised
+   volatility, drawdowns, allocation over time, then the metrics and trading tables.
+4. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
+   stated limit, worst fall, one-year VaR and expected shortfall, vs benchmark.
+- **About Us** — a dialog opened by the top-right button: short project presentation and one card
+  per team member. Team data lives in ONE editable file, `data/team.json` (name, role, description,
+  photo path, LinkedIn; optional `repository` link). Photos go in `assets/team/`; a missing photo
+  shows a round avatar with the initials (`src/team.py`). No e-mail addresses. Own texts and style,
+  nothing from reference/.
 
 ## Code organisation
 ```
@@ -195,11 +218,12 @@ app.py                     # Streamlit UI only — no heavy logic
 src/data.py                # loading parquet, universe tags
 src/estimators.py          # Black-Litterman (and shrunk) means, Ledoit-Wolf covariance, eligibility window
 src/optimizer.py           # cvxpy problem builder, constraint objects, infeasibility diagnosis
-src/frontier.py            # efficient frontier under the client's constraints
+src/frontier.py            # efficient frontier under the client's constraints, min-variance, tangency
+src/diversification.py     # risk contributions (Euler), diversification measures
 src/benchmarks.py          # SPY and SPY/bond profile benchmarks, ex-ante comparison
 src/bonds.py               # bond sleeve analytics (segments, duration, rating), rating scale
 src/backtest.py            # rolling backtest engine
-src/risk.py                # performance metrics, Monte Carlo block bootstrap
+src/risk.py                # performance metrics, Monte Carlo block bootstrap, VaR / expected shortfall
 src/profiling.py           # questionnaire -> profile -> vol cap, bond floor, default constraints
 src/team.py                # About Us: team.json loader, photo or initials avatar
 scripts/build_universe.py  # constituents snapshot -> data/universe.csv
@@ -228,4 +252,5 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
   into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), numpy 2.3.x
   (pandas 2.3 resample warns under 2.5). matplotlib and fpdf2 were removed with the unused PDF
   report module.
-- Theme in `.streamlit/config.toml` (navy primary color, matching the charts).
+- Theme in `.streamlit/config.toml`: dark (navy background); the chart palette in `app.py` (NAVY, GREY,
+  ACCENT) is tuned for it and `fig_layout` uses plotly_dark with transparent backgrounds.

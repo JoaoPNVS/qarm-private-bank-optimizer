@@ -54,6 +54,29 @@ def test_questionnaire_risk_measures():
     assert np.isclose(x["dd_p5"], -(1 - 0.98 ** 12), atol=0.05) or x["dd_p5"] < -(1 - 0.98 ** 12)
 
 
+def test_value_at_risk_and_expected_shortfall():
+    idx = pd.date_range("2000-01-31", periods=24, freq="ME")
+    hist = pd.DataFrame({"x": [-0.02] * 12 + [0.03] * 12, "flat": np.full(24, 0.001)}, index=idx)
+    out = risk.wealth_simulation(hist, 1.0, years=3, n_sims=4000, block=12, seed=0)
+    x, flat = out["x"], out["flat"]
+    worst_year = 0.98 ** 12 - 1                                   # a pure "A" year, the worst possible
+    assert worst_year - 1e-12 <= x["year_es95"] <= x["year_var95"] < 0   # the average of the tail is below its threshold
+    # every simulated year of the flat series is the same, so VaR = ES = that one-year return
+    assert np.isclose(flat["year_var95"], 1.001 ** 12 - 1) and np.isclose(flat["year_es95"], flat["year_var95"])
+
+
+def test_risk_measures_do_not_depend_on_wealth():
+    # yearly blocks repeat across scenarios (ties at the 5% cut-off): the wealth must not move them
+    ret = data.load_returns()["AAPL"].dropna().iloc[-120:]
+    hist = pd.DataFrame({"x": ret.values, "y": ret.values * 0.5 + 0.002}, index=ret.index)
+    a = risk.wealth_simulation(hist, 5_000_000, years=20)
+    b = risk.wealth_simulation(hist, 1_000_000, years=20)
+    for name in a:
+        for key in ("prob_loss", "prob_year_loss", "dd_median", "dd_p5", "year_var95", "year_es95"):
+            assert a[name][key] == b[name][key], (name, key)
+        assert np.isclose(a[name]["median"], 5 * b[name]["median"])
+
+
 def test_too_short_history_is_a_clear_error():
     hist = pd.DataFrame({"a": np.zeros(20)}, index=pd.date_range("2000-01-31", periods=20, freq="ME"))
     with pytest.raises(ValueError, match="24 months"):
