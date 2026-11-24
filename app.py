@@ -13,9 +13,11 @@ import streamlit as st
 
 from src import backtest as btm, benchmarks as bm, bonds, data, estimators as est, frontier as fr, optimizer as opt, profiling as prof, risk, team
 
-st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide")
+st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide",
+                   initial_sidebar_state="collapsed")
 
-NAVY, GREY, ACCENT = "#1f3b57", "#a3adb8", "#c0392b"
+# Dark theme only — chart palette tuned for readability on the dark navy background.
+NAVY, GREY, ACCENT = "#7bace0", "#8f9bac", "#e07f6b"
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
 CLASS_LABELS = {"Equity": "Equities", "Bond": "Bonds", "Commodity": "Gold", "Cash": "Cash & equivalents"}
 WINDOW = est.DEFAULT_WINDOW
@@ -56,9 +58,11 @@ def bench_label(profile: str) -> str:
 
 def fig_layout(fig, height=380):
     # legend below the plot: above it, it collided with the title and wrapped over narrow charts
-    fig.update_layout(template="plotly_white", height=height, margin=dict(l=10, r=10, t=50, b=10),
-                      legend=dict(orientation="h", yanchor="top", y=-0.15, x=0, xanchor="left"),
-                      font=dict(size=13), title=dict(x=0, xanchor="left"))
+    fig.update_layout(template="plotly_dark",
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      height=height, margin=dict(l=10, r=10, t=50, b=110),
+                      legend=dict(orientation="h", yanchor="top", y=-0.42, x=0, xanchor="left"),
+                      font=dict(size=13, color="#e6ecf5"), title=dict(x=0, xanchor="left"))
     return fig
 
 
@@ -150,7 +154,7 @@ def pct_slider(label, default, lo, hi, step, key, disabled=False):
 def require_ok(res: opt.OptimizationResult) -> bool:
     if not res.ok:
         st.error(res.message)
-        st.info("Adjust the constraints in the **Constraints** tab.")
+        st.info("Open the **Adjust constraints** panel above to loosen the conflicting rules.")
     return res.ok
 
 
@@ -161,7 +165,18 @@ def grouped_bars(table: pd.DataFrame, title: str, colors=(NAVY, GREY)):
     return f
 
 
-# --- data & sidebar --------------------------------------------------------------------------
+def avatar_html(member: team.Member, size: int = 112) -> str:
+    """Round photo, or a round avatar with the initials when the photo is missing."""
+    uri = team.photo_data_uri(member)
+    style = f"width:{size}px;height:{size}px;border-radius:50%;margin:0.25rem auto 0.75rem auto;display:block;"
+    if uri:
+        return f'<img src="{uri}" alt="{html.escape(member.name)}" style="{style}object-fit:cover;">'
+    return (f'<div style="{style}background:{NAVY};color:#ffffff;display:flex;align-items:center;'
+            f'justify-content:center;font-size:{size // 3}px;font-weight:600;letter-spacing:1px;">'
+            f'{html.escape(team.initials(member.name))}</div>')
+
+
+# --- data & header ---------------------------------------------------------------------------
 
 try:
     universe, returns, rf, bench = load_data()
@@ -175,46 +190,242 @@ label = lambda t: f"{names.get(t, t)} ({t})"  # noqa: E731
 answers = {q.key: st.session_state.get(f"q.{q.key}", 1) for q in prof.QUESTIONS}
 assessment = prof.assess(answers)
 
-with st.sidebar:
-    st.title("Private Client Portfolio Optimizer")
-    st.caption("Highest expected return within the client's risk budget. All figures in USD.")
-    wealth = st.number_input("Client wealth (USD)", min_value=100_000, max_value=1_000_000_000,
-                             value=5_000_000, step=250_000, format="%d")
-    choice = st.selectbox("Risk profile", ["auto"] + prof.PROFILES, key="profile",
-                          format_func=lambda p: f"From questionnaire ({assessment.profile})" if p == "auto" else p)
-    profile = assessment.profile if choice == "auto" else choice
-    spec_p = prof.SPECS[profile]
-    st.markdown(f"**{profile}** — {spec_p.description}")
-    st.markdown(f"Risk budget: **{spec_p.max_volatility:.0%}** volatility · bonds at least "
-                f"**{spec_p.min_bonds:.0%}** · benchmark **{spec_p.benchmark_equity:.0%} SPY / "
-                f"{1 - spec_p.benchmark_equity:.0%} AGG**")
-    st.divider()
-    confidence = st.slider(
-        "Confidence in past performance", 0, int(est.MAX_VIEW_CONFIDENCE * 100),
-        int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
-        help="Black-Litterman. Expected returns start from the market equilibrium: each asset's return "
-             "reflects only its risk relative to a 60% SPY / 40% AGG market portfolio. Each asset's average "
-             f"return over the last {WINDOW} months is then added as a view, with this confidence. Because "
-             "assets move together, the views reinforce each other, so even 10% tilts the portfolio noticeably. "
-             "0% = pure equilibrium: most diversified, closest to the promised risk. Higher = more weight on "
-             "recent trends, with more risk and trading.") / 100
-    st.caption(f"Data: monthly total returns in USD up to {returns.index[-1]:%B %Y} (yfinance). "
-               f"Estimates use the last {WINDOW} months. Risk-free: 3-month T-bill, currently "
-               f"{rf.iloc[-1] * 12:.2%} p.a.")
+if "open_q" not in st.session_state:
+    st.session_state["open_q"] = prof.QUESTIONS[0].key
 
-tabs = st.tabs(["Client Profile", "Constraints", "Portfolio", "Backtest", "Simulation", "About Us"])
+# Drop stale selectbox state: an earlier run may have left a display label (e.g.
+# "From questionnaire (Conservative)") in st.session_state["profile"], which is no longer a
+# valid option and would crash prof.SPECS lookups downstream.
+if st.session_state.get("profile") not in ("auto", *prof.PROFILES):
+    st.session_state.pop("profile", None)
+
+# Accordion renders only one question's radio at a time; Streamlit garbage-collects widget state
+# when the widget isn't rendered this run, which would reset previous answers. Re-asserting the
+# value here prevents the GC and keeps the Resulting profile stable across accordion switches.
+for _q in prof.QUESTIONS:
+    _k = f"q.{_q.key}"
+    if _k in st.session_state:
+        st.session_state[_k] = st.session_state[_k]
+
+
+def _toggle_question(key: str) -> None:
+    st.session_state["open_q"] = None if st.session_state.get("open_q") == key else key
+
+
+_tv = {
+    "bg": "#0d1a2b", "surface": "#122238", "surface_2": "#1a2d47", "border": "#2b4466",
+    "text": "#e6ecf5", "text_dim": "#9aa9bf", "accent": "#5a92c4", "accent_hover": "#7bace0",
+    "shadow": "0 8px 32px rgba(0,0,0,0.5)", "dock_bg": "rgba(26,45,71,0.95)",
+}
+
+st.markdown(f"""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {{
+  --bg: {_tv['bg']}; --surface: {_tv['surface']}; --surface-2: {_tv['surface_2']};
+  --border: {_tv['border']}; --text: {_tv['text']}; --text-dim: {_tv['text_dim']};
+  --accent: {_tv['accent']}; --accent-hover: {_tv['accent_hover']};
+  --shadow: {_tv['shadow']}; --dock-bg: {_tv['dock_bg']};
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'IBM Plex Serif', Georgia, serif;
+}}
+html, body, .stApp, [data-testid="stAppViewContainer"], button, input, select, textarea {{
+  font-family: var(--font-sans) !important;
+}}
+h1, h2, h3 {{ font-family: var(--font-serif) !important; letter-spacing: -0.01em; font-weight: 500 !important; }}
+.stApp h1 {{ color: var(--text) !important; }}
+.stApp, html, body {{ background: var(--bg); color: var(--text); }}
+/* Hide Streamlit's native header (Deploy button + hamburger) — overlaps our top controls */
+[data-testid="stHeader"] {{ display: none !important; }}
+[data-testid="stToolbar"] {{ display: none !important; }}
+h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stCaption, .stText {{ color: var(--text); }}
+[data-testid="stCaptionContainer"] p, small, .stCaption {{ color: var(--text-dim) !important; }}
+div[data-testid="stMetricValue"], div[data-testid="stMetricLabel"], div[data-testid="stMetricDelta"] {{ color: var(--text); }}
+/* Containers / borders */
+div[data-testid="stExpander"], div[data-testid="stAlert"], div[data-testid="stNotification"],
+div[data-testid="stDataFrame"], .stTabs [data-baseweb="tab-panel"] > div > div > div[data-testid*="stVertical"] > div > div > div[data-testid="stContainer"] {{
+  border-color: var(--border) !important;
+}}
+div[data-testid="stContainer"] > div[data-testid="stVerticalBlock"] > div[data-testid="stContainer"] {{
+  background: var(--surface);
+}}
+/* Inputs */
+[data-baseweb="input"] input, [data-baseweb="select"] div, textarea {{
+  background: var(--surface-2) !important; color: var(--text) !important;
+}}
+/* Primary buttons */
+button[kind="primary"] {{ background: var(--accent) !important; color: #fff !important; border: none !important; }}
+button[kind="primary"]:hover {{ background: var(--accent-hover) !important; }}
+/* Tighten top padding (Streamlit leaves ~6rem by default) and reserve space for the bottom nav */
+.block-container {{ padding-top: 1.5rem !important; padding-bottom: 120px !important; }}
+h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
+/* Main nav (Client Profile / Portfolio / ...): floating iOS-style pill, fixed bottom */
+.st-key-main-nav [role="tablist"] {{
+  position: fixed !important; bottom: 24px !important; left: 50% !important;
+  transform: translateX(-50%) !important; width: auto !important; max-width: 92vw !important;
+  background: var(--dock-bg) !important; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(123,172,224,0.35) !important; border-radius: 999px !important;
+  padding: 10px 14px !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(123,172,224,0.08), 0 0 32px rgba(90,146,196,0.18) !important;
+  z-index: 1000 !important; gap: 8px !important; justify-content: center !important;
+  display: flex !important;
+}}
+.st-key-main-nav [role="tab"] {{
+  background: transparent !important; color: var(--text) !important;
+  border-radius: 999px !important; padding: 16px 56px !important;
+  font-weight: 500 !important; font-size: 1.25rem !important; line-height: 1.2 !important;
+  border: none !important; transition: background 0.15s, color 0.15s, transform 0.15s;
+  min-width: 170px !important; text-align: center !important;
+}}
+.st-key-main-nav [role="tab"]:hover {{ background: rgba(255,255,255,0.08) !important; transform: translateY(-1px); }}
+.st-key-main-nav [role="tab"][aria-selected="true"] {{
+  background: var(--accent) !important; color: #ffffff !important; font-weight: 600 !important;
+  box-shadow: 0 4px 14px rgba(90,146,196,0.45) !important;
+}}
+/* Sub-tabs inside Portfolio: bright orange bordered pill group */
+.st-key-portfolio-subtabs [role="tablist"] {{
+  position: static !important; transform: none !important;
+  background: var(--surface) !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  border: 2px solid #e07f6b !important; border-radius: 10px !important;
+  box-shadow: 0 0 0 1px rgba(224,127,107,0.15) !important;
+  padding: 5px !important; width: fit-content !important; max-width: none !important;
+  gap: 2px !important; justify-content: flex-start !important;
+  margin: 0.5rem 0 1.5rem !important;
+  z-index: auto !important;
+}}
+.st-key-portfolio-subtabs [role="tab"] {{
+  padding: 8px 22px !important; border-radius: 6px !important;
+  font-size: 0.95rem !important; font-weight: 500 !important;
+  color: var(--text-dim) !important; background: transparent !important;
+  min-width: unset !important;
+}}
+.st-key-portfolio-subtabs [role="tab"]:hover {{
+  background: rgba(224,127,107,0.08) !important; color: var(--text) !important;
+}}
+.st-key-portfolio-subtabs [role="tab"][aria-selected="true"] {{
+  background: #e07f6b !important; color: #ffffff !important;
+  border-bottom: none !important; border-radius: 6px !important;
+  box-shadow: none !important; font-weight: 600 !important;
+}}
+/* Kill the react-aria selection indicator (thin blue bar under the active tab) */
+.react-aria-SelectionIndicator {{ display: none !important; }}
+/* Backtest "Rebalancing" selectbox — orange theme to match the sub-tabs */
+.st-key-bt-rebalance label p {{ color: #e07f6b !important; font-weight: 600 !important; }}
+.st-key-bt-rebalance [data-baseweb="select"] > div {{
+  background: var(--surface) !important;
+  border: 2px solid #e07f6b !important; border-radius: 10px !important;
+  box-shadow: 0 0 0 1px rgba(224,127,107,0.15) !important;
+}}
+.st-key-bt-rebalance [data-baseweb="select"] > div:hover {{
+  border-color: #f09a85 !important;
+}}
+.st-key-bt-rebalance [data-baseweb="select"] input,
+.st-key-bt-rebalance [data-baseweb="select"] div[role="combobox"] {{
+  color: var(--text) !important; font-weight: 500 !important;
+}}
+/* Top-right About Us button */
+.st-key-top-controls {{
+  position: fixed !important; top: 14px !important; right: 20px !important;
+  z-index: 1001 !important; width: auto !important;
+}}
+.st-key-top-controls button {{
+  background: var(--surface) !important; color: var(--text) !important;
+  border: 1px solid var(--border) !important; border-radius: 999px !important;
+  padding: 4px 18px !important; font-size: 0.85rem !important;
+  white-space: nowrap !important; overflow: visible !important;
+}}
+.st-key-top-controls button:hover {{ background: var(--surface-2) !important; }}
+</style>
+""", unsafe_allow_html=True)
+
+
+@st.dialog("About us", width="large")
+def _about_dialog():
+    st.markdown(
+        "We play the role of an **international private bank** advising clients whose reference currency is "
+        "the US dollar. The app turns a short suitability questionnaire into a risk profile, then builds the "
+        "portfolio with the highest expected return that stays within the client's volatility budget and "
+        "investment constraints. Every recommendation is backtested and its future range of outcomes simulated, "
+        "so the client can see both the potential and the risks. It was built for the course *Quantitative "
+        "Asset and Risk Management II* at HEC Lausanne.")
+    members, repository, team_error = team.load_team()
+    if team_error:
+        st.warning(team_error)
+    st.markdown("#### The team")
+    for start in range(0, len(members), 3):
+        cols = st.columns(3, gap="medium")
+        for col, m in zip(cols, members[start:start + 3]):
+            with col.container(border=True):
+                st.markdown(avatar_html(m), unsafe_allow_html=True)
+                st.markdown(f'<div style="text-align:center;font-weight:600;font-size:1.1rem;">{html.escape(m.name)}</div>'
+                            f'<div style="text-align:center;color:{NAVY};font-size:0.9rem;margin-bottom:0.5rem;">'
+                            f'{html.escape(m.role)}</div>'
+                            f'<div style="text-align:center;color:var(--text-dim);font-size:0.9rem;">{html.escape(m.description)}</div>',
+                            unsafe_allow_html=True)
+                if m.linkedin:
+                    st.markdown(f'<div style="text-align:center;margin-top:0.5rem;"><a href="{html.escape(m.linkedin)}" '
+                                f'target="_blank">LinkedIn</a></div>', unsafe_allow_html=True)
+    if repository:
+        st.markdown(f"Source code: [{repository}]({repository})")
+
+
+with st.container(key="top-controls"):
+    if st.button("About Us", key="btn-about", use_container_width=True):
+        _about_dialog()
+
+st.title("Private Client Portfolio Optimizer")
+st.caption("Highest expected return within the client's risk budget. All figures in USD.")
+
+with st.container(key="main-nav"):
+    tabs = st.tabs(["Client Profile", "Portfolio", "Backtest", "Simulation"])
 
 # --- Client Profile --------------------------------------------------------------------------
 
 with tabs[0], guarded("Client Profile"):
+    with st.expander("Client settings", expanded=True):
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            wealth = st.number_input("Client wealth (USD)", min_value=100_000, max_value=1_000_000_000,
+                                     value=5_000_000, step=250_000, format="%d")
+        with s2:
+            choice = st.selectbox("Risk profile", ["auto"] + prof.PROFILES, key="profile",
+                                  format_func=lambda p: f"From questionnaire ({assessment.profile})" if p == "auto" else p)
+        with s3:
+            confidence = st.slider(
+                "Confidence in past performance", 0, int(est.MAX_VIEW_CONFIDENCE * 100),
+                int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
+                help="Black-Litterman. Expected returns start from the market equilibrium: each asset's return "
+                     "reflects only its risk relative to a 60% SPY / 40% AGG market portfolio. Each asset's average "
+                     f"return over the last {WINDOW} months is then added as a view, with this confidence. Because "
+                     "assets move together, the views reinforce each other, so even 10% tilts the portfolio noticeably. "
+                     "0% = pure equilibrium: most diversified, closest to the promised risk. Higher = more weight on "
+                     "recent trends, with more risk and trading.") / 100
+        st.caption(f"Data: monthly total returns in USD up to {returns.index[-1]:%B %Y} (yfinance). "
+                   f"Estimates use the last {WINDOW} months. Risk-free: 3-month T-bill, currently "
+                   f"{rf.iloc[-1] * 12:.2%} p.a.")
+
+    profile = assessment.profile if choice == "auto" else choice
+    spec_p = prof.SPECS[profile]
+    if choice != "auto" and profile != assessment.profile:
+        st.warning(f"The manual override uses **{profile}** instead of the questionnaire's {assessment.profile}.")
+
     st.subheader("Suitability questionnaire")
     left, right = st.columns([3, 2], gap="large")
     with left:
-        for q in prof.QUESTIONS:
-            st.radio(q.text, list(range(len(q.options))), format_func=lambda i, q=q: q.options[i],
-                     key=f"q.{q.key}", index=1)
+        for i, q in enumerate(prof.QUESTIONS, 1):
+            is_open = st.session_state.get("open_q") == q.key
+            st.button(f"**Q{i}**  {q.text}", key=f"btn.{q.key}",
+                      use_container_width=True, on_click=_toggle_question, args=(q.key,))
+            if is_open:
+                with st.container(border=True):
+                    st.radio(q.text, list(range(len(q.options))),
+                             format_func=lambda i, q=q: q.options[i],
+                             key=f"q.{q.key}", index=1, label_visibility="collapsed")
     with right:
-        a = prof.assess({q.key: st.session_state[f"q.{q.key}"] for q in prof.QUESTIONS})
+        a = prof.assess({q.key: st.session_state.get(f"q.{q.key}", 1) for q in prof.QUESTIONS})
         sp = prof.SPECS[a.profile]
         with st.container(border=True):
             st.markdown("#### Resulting profile")
@@ -231,242 +442,256 @@ with tabs[0], guarded("Client Profile"):
             st.markdown(f"**What it means:** expected volatility at most {sp.max_volatility:.0%}, "
                         f"at least {sp.min_bonds:.0%} in bonds, compared with a "
                         f"{sp.benchmark_equity:.0%} SPY / {1 - sp.benchmark_equity:.0%} AGG benchmark.")
-        if choice != "auto" and profile != a.profile:
-            st.warning(f"The sidebar overrides the questionnaire: the **{profile}** profile is used "
-                       f"instead of {a.profile}.")
+
+    with st.expander("All profiles & scoring methodology", expanded=False):
         profiles_table = pd.DataFrame({p: {"Max volatility": f"{s.max_volatility:.0%}",
                                            "Min bonds": f"{s.min_bonds:.0%}",
                                            "Benchmark": f"{s.benchmark_equity:.0%} SPY / {1 - s.benchmark_equity:.0%} AGG"}
                                        for p, s in prof.SPECS.items()}).T
         st.dataframe(profiles_table, width="stretch")
-        st.caption("Scoring: each answer scores 1-4. Capacity and willingness averages map to a profile "
+        st.caption("Each answer scores 1-4. Capacity and willingness averages map to a profile "
                    "(<1.75 Conservative, <2.50 Balanced, <3.25 Growth, otherwise Dynamic); the lower one is "
                    "kept, then capped by knowledge. A horizon below 3 years always gives Conservative.")
 
-# --- Constraints -----------------------------------------------------------------------------
+# --- Portfolio (constraints live in an expander inside this tab) -----------------------------
 
 defaults = {c.key: c for c in prof.default_constraints(profile)}
 cons_spec: dict = {}
 stock_tickers = [t for t in universe.index if universe.at[t, "vehicle"] == "Stock"]
 sectors = sorted(universe.loc[universe["asset_class"] == "Equity", "sector"].unique())
 
-with tabs[1], guarded("Constraints"):
-    st.subheader(f"Client constraints — defaults of the {profile} profile")
+with tabs[1], guarded("Portfolio"):
+    # Sub-tabs at the very top of the Portfolio view; wrapped in a keyed container so our CSS
+    # can target them unambiguously (the generic .stTabs .stTabs selector was not matching).
+    with st.container(key="portfolio-subtabs"):
+        sub_overview, sub_alloc, sub_bonds, sub_holdings = st.tabs(
+            ["Overview", "Allocation", "Bonds", "Holdings"])
     status_box = st.container()
-    k = lambda name: f"{profile}.{name}"  # noqa: E731  (each profile keeps its own settings)
-    col_a, col_b = st.columns(2, gap="large")
 
-    def card(key, column, render, mandatory=False):
-        c = defaults[key]
-        with column.container(border=True):
-            if mandatory:
-                st.markdown(f"**{c.name}** (risk budget of the profile)")
-                active = True
-            else:
-                active = st.toggle(c.name, value=True, key=k(f"{key}.on"))
-            params = render(not active)
-            cons_spec[key] = {"active": active, "params": params}
-            st.caption(c.describe(params))
+    with st.expander(f"Adjust constraints ({profile} defaults)", expanded=False):
+        k = lambda name: f"{profile}.{name}"  # noqa: E731  (each profile keeps its own settings)
 
-    card("max_volatility", col_a, lambda off: {"limit": pct_slider(
-        "Max expected volatility", spec_p.max_volatility, 2, 25, 0.5, k("vol"), off)}, mandatory=True)
-    card("min_bonds", col_a, lambda off: {"min_share": pct_slider(
-        "Min share in bond funds", spec_p.min_bonds, 0, 100, 5, k("bonds"), off)})
-    card("max_cash", col_a, lambda off: {"limit": pct_slider(
-        "Max cash", prof.MAX_CASH, 0, 100, 5, k("cash"), off)})
-    card("em_equity_cap", col_a, lambda off: {"ratio": pct_slider(
-        "Max emerging markets (share of equities)", prof.EM_EQUITY_CAP, 0, 100, 1, k("em"), off)})
-    card("max_stock_weight", col_b, lambda off: {"limit": pct_slider(
-        "Max weight per stock", prof.MAX_STOCK_WEIGHT, 1, 30, 1, k("stock"), off)})
-    card("max_etf_weight", col_b, lambda off: {"limit": pct_slider(
-        "Max weight per equity / gold ETF", prof.MAX_ETF_WEIGHT, 5, 100, 5, k("etf"), off)})
-    card("max_bond_etf_weight", col_a, lambda off: {"limit": pct_slider(
-        "Max weight per bond ETF", prof.MAX_BOND_ETF_WEIGHT, 5, 100, 5, k("bondetf"), off)})
-    card("max_bond_duration", col_a, lambda off: {"limit": st.slider(
-        "Max average duration of the bonds (years)", 0.5, 15.0, float(spec_p.max_bond_duration), 0.5,
-        key=k("duration"), disabled=off)})
-    card("min_investment_grade", col_a, lambda off: {"min_share": pct_slider(
-        "Min investment grade (share of bonds)", spec_p.min_investment_grade, 0, 100, 5, k("ig"), off)})
-    card("max_high_yield", col_a, lambda off: {"limit": pct_slider(
-        "Max high yield incl. EM bonds (share of portfolio)", spec_p.max_high_yield, 0, 100, 1, k("hy"), off)})
-    card("max_sector_weight", col_b, lambda off: {"limit": pct_slider(
-        "Max weight per equity sector", prof.MAX_SECTOR_WEIGHT, 5, 100, 5, k("sector"), off)})
-    card("exclusions", col_b, lambda off: {
-        "sectors": st.multiselect("Excluded sectors", sectors, default=[], key=k("excl.sectors"), disabled=off),
-        "tickers": st.multiselect("Excluded companies", stock_tickers, default=[], format_func=label,
-                                  key=k("excl.tickers"), disabled=off)})
-    st.caption("Emerging markets = the EEM fund plus PDD (China) and MELI (Latin America). International "
-               "equity funds (VGK, EWJ, EEM) count as one sector. Bond funds and gold are not subject to "
-               "the sector limit. Bond durations and ratings are the funds' current fact-sheet values. "
-               "High yield = HYG and the emerging-market bond fund EMB.")
+        def card(key, column, render, mandatory=False):
+            c = defaults[key]
+            with column.container(border=True):
+                if mandatory:
+                    st.markdown(f"**{c.name}** (risk budget of the profile)")
+                    active = True
+                else:
+                    active = st.toggle(c.name, value=True, key=k(f"{key}.on"))
+                params = render(not active)
+                cons_spec[key] = {"active": active, "params": params}
+                st.caption(c.describe(params))
 
-# --- optimisation ----------------------------------------------------------------------------
+        st.markdown("##### Risk budget")
+        col_a, col_b = st.columns(2, gap="large")
+        card("max_volatility", col_a, lambda off: {"limit": pct_slider(
+            "Max expected volatility", spec_p.max_volatility, 2, 25, 0.5, k("vol"), off)}, mandatory=True)
+        card("min_bonds", col_a, lambda off: {"min_share": pct_slider(
+            "Min share in bond funds", spec_p.min_bonds, 0, 100, 5, k("bonds"), off)})
+        card("max_cash", col_b, lambda off: {"limit": pct_slider(
+            "Max cash", prof.MAX_CASH, 0, 100, 5, k("cash"), off)})
 
-cons_json = json.dumps(cons_spec, sort_keys=True)
-try:
-    res, bench_stats, spy_stats, te = optimise(profile, cons_json, confidence)
-except EXPECTED_ERRORS as exc:
-    st.error(f"The portfolio could not be computed: {exc}")
-    st.stop()
-except Exception:
-    log.exception("Unexpected error in the optimisation")
-    st.error("The portfolio could not be computed because of an unexpected error. Please change the inputs "
-             "and try again.")
-    st.stop()
+        st.markdown("##### Bond sleeve")
+        col_a, col_b = st.columns(2, gap="large")
+        card("max_bond_etf_weight", col_a, lambda off: {"limit": pct_slider(
+            "Max weight per bond ETF", prof.MAX_BOND_ETF_WEIGHT, 5, 100, 5, k("bondetf"), off)})
+        card("max_bond_duration", col_a, lambda off: {"limit": st.slider(
+            "Max average duration of the bonds (years)", 0.5, 15.0, float(spec_p.max_bond_duration), 0.5,
+            key=k("duration"), disabled=off)})
+        card("min_investment_grade", col_b, lambda off: {"min_share": pct_slider(
+            "Min investment grade (share of bonds)", spec_p.min_investment_grade, 0, 100, 5, k("ig"), off)})
+        card("max_high_yield", col_b, lambda off: {"limit": pct_slider(
+            "Max high yield incl. EM bonds (share of portfolio)", spec_p.max_high_yield, 0, 100, 1, k("hy"), off)})
 
-with status_box:
-    if res.ok:
-        binding = res.duals.loc[res.duals["active"], "constraint"].unique().tolist()
-        st.success("All active constraints are satisfied. Binding: " + (", ".join(binding) or "none") + ".")
-    else:
-        st.error(res.message)
+        st.markdown("##### Equities")
+        col_a, col_b = st.columns(2, gap="large")
+        card("max_stock_weight", col_a, lambda off: {"limit": pct_slider(
+            "Max weight per stock", prof.MAX_STOCK_WEIGHT, 1, 30, 1, k("stock"), off)})
+        card("max_etf_weight", col_a, lambda off: {"limit": pct_slider(
+            "Max weight per equity / gold ETF", prof.MAX_ETF_WEIGHT, 5, 100, 5, k("etf"), off)})
+        card("max_sector_weight", col_b, lambda off: {"limit": pct_slider(
+            "Max weight per equity sector", prof.MAX_SECTOR_WEIGHT, 5, 100, 5, k("sector"), off)})
+        card("em_equity_cap", col_b, lambda off: {"ratio": pct_slider(
+            "Max emerging markets (share of equities)", prof.EM_EQUITY_CAP, 0, 100, 1, k("em"), off)})
 
-# --- Portfolio -------------------------------------------------------------------------------
+        st.markdown("##### Exclusions")
+        card("exclusions", st, lambda off: {
+            "sectors": st.multiselect("Excluded sectors", sectors, default=[], key=k("excl.sectors"), disabled=off),
+            "tickers": st.multiselect("Excluded companies", stock_tickers, default=[], format_func=label,
+                                      key=k("excl.tickers"), disabled=off)})
 
-with tabs[2], guarded("Portfolio"):
-    st.subheader(f"Recommended portfolio — {profile} profile")
+        st.caption("Emerging markets = the EEM fund plus PDD (China) and MELI (Latin America). International "
+                   "equity funds (VGK, EWJ, EEM) count as one sector. Bond funds and gold are not subject to "
+                   "the sector limit. Bond durations and ratings are the funds' current fact-sheet values. "
+                   "High yield = HYG and the emerging-market bond fund EMB.")
+
+    cons_json = json.dumps(cons_spec, sort_keys=True)
+    try:
+        res, bench_stats, spy_stats, te = optimise(profile, cons_json, confidence)
+    except EXPECTED_ERRORS as exc:
+        st.error(f"The portfolio could not be computed: {exc}")
+        st.stop()
+    except Exception:
+        log.exception("Unexpected error in the optimisation")
+        st.error("The portfolio could not be computed because of an unexpected error. Please change the inputs "
+                 "and try again.")
+        st.stop()
+
+    with status_box:
+        if res.ok:
+            binding = res.duals.loc[res.duals["active"], "constraint"].unique().tolist()
+            st.success("All active constraints are satisfied. Binding: " + (", ".join(binding) or "none") + ".")
+        else:
+            st.error(res.message)
+
     if require_ok(res):
         w = res.weights
         uni = universe.loc[w.index]
-        c = st.columns(4)
-        c[0].metric("Expected return above T-bill", pct(res.expected_return, 2),
-                    f"{(res.expected_return - bench_stats['expected_return']) * 1e4:+.0f} bps vs benchmark")
-        c[1].metric("Expected volatility", pct(res.volatility, 2),
-                    f"{(res.volatility - bench_stats['volatility']) * 100:+.2f} pp vs benchmark", delta_color="inverse")
-        c[2].metric("Sharpe ratio", f"{res.sharpe:.2f}", f"{res.sharpe - bench_stats['sharpe']:+.2f} vs benchmark")
-        c[3].metric("Tracking error vs benchmark", pct(te, 2))
-        comp = pd.DataFrame({"Portfolio": [res.expected_return, res.volatility, res.sharpe],
-                             bench_label(profile): [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
-                             "SPY": [spy_stats["expected_return"], spy_stats["volatility"], spy_stats["sharpe"]]},
-                            index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
-        st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
-                     .format("{:.2f}", subset=pd.IndexSlice[["Sharpe ratio"], :]), width="stretch")
-        st.caption(f"Ex-ante figures, estimated on the last {WINDOW} months. Expected returns: Black-Litterman, i.e. "
-                   "market-equilibrium returns (implied by a 60% SPY / 40% AGG market portfolio) combined with each "
-                   f"asset's recent average return as a view, at {confidence:.0%} confidence (sidebar). Risk: Ledoit-Wolf "
-                   "covariance. The portfolio and its benchmarks are estimated with the same method; see the "
-                   "Backtest tab for what this strategy actually delivered.")
-
-        st.markdown("### Efficient frontier")
-        try:
-            front, free = frontiers(profile, cons_json, confidence)
-        except EXPECTED_ERRORS as exc:
-            st.error(f"The efficient frontier could not be computed: {exc}")
-            front = None
-        if front is not None:
-            cap = cons_spec["max_volatility"]["params"]["limit"]
-            free_at_cap = float(np.interp(res.volatility, free["volatility"], free["expected_return"]))
-            cost_bps = max(free_at_cap - res.expected_return, 0.0) * 1e4
-            f1, f2 = st.columns([3, 2], gap="large")
-            f = go.Figure([
-                go.Scatter(x=free["volatility"] * 100, y=free["expected_return"] * 100, name="Without client constraints",
-                           line=dict(color=GREY, width=2, dash="dash")),
-                go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
-                           name="With your constraints", line=dict(color=NAVY, width=3)),
-                go.Scatter(x=[bench_stats["volatility"] * 100], y=[bench_stats["expected_return"] * 100],
-                           name=bench_label(profile), mode="markers",
-                           marker=dict(color=GREY, size=13, symbol="diamond", line=dict(color="white", width=1))),
-                go.Scatter(x=[spy_stats["volatility"] * 100], y=[spy_stats["expected_return"] * 100], name="SPY",
-                           mode="markers", marker=dict(color=ACCENT, size=12, line=dict(color="white", width=1))),
-                go.Scatter(x=[res.volatility * 100], y=[res.expected_return * 100], name="Recommended portfolio",
-                           mode="markers", marker=dict(color=NAVY, size=18, symbol="star", line=dict(color="white", width=1)))])
-            f.add_vline(x=cap * 100, line=dict(color=NAVY, width=1, dash="dot"),
-                        annotation_text=f"Risk budget {cap:.0%}", annotation_position="top left")
-            f.update_layout(title="Best expected return for each level of risk", xaxis_title="Expected volatility (% p.a.)",
-                            yaxis_title="Expected return above T-bill (% p.a.)")
-            f1.plotly_chart(fig_layout(f, 430), width="stretch")
-            mix = front.set_index("volatility")[fr.CLASS_ORDER].rename(columns=CLASS_LABELS) * 100
-            g = go.Figure([go.Scatter(x=mix.index * 100, y=mix[c], name=c, stackgroup="one", mode="none", fillcolor=clr)
-                           for c, clr in zip(mix.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
-            g.add_vline(x=cap * 100, line=dict(color="white", width=2, dash="dot"))
-            g.update_layout(title="Allocation along the frontier", xaxis_title="Expected volatility (% p.a.)",
-                            yaxis_title="% of portfolio", yaxis_range=[0, 100])
-            f2.plotly_chart(fig_layout(g, 430), width="stretch")
-            st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
-                       f"risk. The recommended portfolio (star) is the point at the risk budget. At this risk, "
-                       f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
-                       "year: that is what diversification limits, the bond floor and the other rules cost on these "
-                       "estimates, in exchange for a sturdier portfolio. Without constraints the curve starts at cash "
-                       "(zero risk) and is almost a straight line: mixing cash with the best risky portfolio, as on "
-                       "the capital market line. The benchmark and SPY sit below the curve: "
-                       "for the same estimated risk, an optimised mix of the universe expects more (before "
-                       "estimation error; see the Backtest tab).")
-
-        b_eq = spec_p.benchmark_equity
-        by_class = pd.DataFrame({"Portfolio": w.groupby(uni["asset_class"]).sum(),
-                                 "Benchmark": pd.Series({"Equity": b_eq, "Bond": 1 - b_eq})}).reindex(CLASS_ORDER).fillna(0)
-        by_class.index = by_class.index.map(CLASS_LABELS)
         is_bond = uni["asset_class"] == "Bond"
         is_eq = uni["asset_class"] == "Equity"
-        by_sector = w[is_eq].groupby(uni.loc[is_eq, "sector"]).sum().sort_values(ascending=False)
-        b1, b3 = st.columns(2)
-        b1.plotly_chart(fig_layout(grouped_bars(by_class, "By asset class"), 340), width="stretch")
-        f = go.Figure(go.Bar(x=by_sector.index, y=by_sector * 100, marker_color=NAVY))
-        f.update_layout(title=f"Equities by sector ({by_sector.sum():.0%} of the portfolio)", yaxis_title="% of portfolio")
-        b3.plotly_chart(fig_layout(f, 340), width="stretch")
-        em = w[is_eq & uni["is_EM"]].sum()
-        st.markdown(f"**Emerging markets:** {pct(em)} of the portfolio, {pct(em / max(w[is_eq].sum(), 1e-12))} of equities. "
-                    f"**Cash:** {pct(w[uni['asset_class'] == 'Cash'].sum())}. **Positions above 0.5%:** {(w > 0.005).sum()}.")
 
-        st.markdown("### Bond portfolio")
-        bs = bonds.sleeve_summary(w, universe)
-        if bs["share"] <= 0:
-            st.info("No bonds in this portfolio.")
-        else:
-            c = st.columns(5)
-            c[0].metric("Bonds in the portfolio", pct(bs["share"]))
-            c[1].metric("Average duration", f"{bs['duration']:.1f} years")
-            c[2].metric("Average rating", bs["avg_rating"])
-            c[3].metric("Investment grade", pct(bs["ig_share"]), help="Share of the bond portfolio")
-            c[4].metric("High yield incl. EM", pct(bs["hy_share_of_portfolio"]), help="Share of the whole portfolio")
-            g1, g2, g3 = st.columns(3)
-            for col, key, title in ((g1, "by_issuer", "By issuer type"), (g2, "by_maturity", "By maturity"),
-                                    (g3, "by_quality", "By credit quality")):
-                s_ = bs[key]
-                f = go.Figure(go.Bar(x=s_.index, y=s_ * 100, marker_color=NAVY))
-                f.update_layout(title=title, yaxis_title="% of bonds")
-                col.plotly_chart(fig_layout(f, 300), width="stretch")
-            st.dataframe(bs["funds"].style.format({"Duration": "{:.1f}", "Weight": "{:.1%}", "Share of bonds": "{:.1%}"}),
-                         width="stretch")
-            st.caption("Duration and ratings are the funds' current fact-sheet values (iShares, State Street, "
-                       "Vanguard, Sept./Oct. 2026), applied to the whole history. Maturity buckets use the average "
-                       "maturity: <1y ultra-short, 1-5y short, 5-10y intermediate, 10y+ long.")
+        with sub_overview:
+            c = st.columns(4)
+            c[0].metric("Expected return above T-bill", pct(res.expected_return, 2),
+                        f"{(res.expected_return - bench_stats['expected_return']) * 1e4:+.0f} bps vs benchmark")
+            c[1].metric("Expected volatility", pct(res.volatility, 2),
+                        f"{(res.volatility - bench_stats['volatility']) * 100:+.2f} pp vs benchmark", delta_color="inverse")
+            c[2].metric("Sharpe ratio", f"{res.sharpe:.2f}", f"{res.sharpe - bench_stats['sharpe']:+.2f} vs benchmark")
+            c[3].metric("Tracking error vs benchmark", pct(te, 2))
+            comp = pd.DataFrame({"Portfolio": [res.expected_return, res.volatility, res.sharpe],
+                                 bench_label(profile): [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
+                                 "SPY": [spy_stats["expected_return"], spy_stats["volatility"], spy_stats["sharpe"]]},
+                                index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
+            st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
+                         .format("{:.2f}", subset=pd.IndexSlice[["Sharpe ratio"], :]), width="stretch")
+            st.caption(f"Ex-ante figures, estimated on the last {WINDOW} months. Expected returns: Black-Litterman, i.e. "
+                       "market-equilibrium returns (implied by a 60% SPY / 40% AGG market portfolio) combined with each "
+                       f"asset's recent average return as a view, at {confidence:.0%} confidence. Risk: Ledoit-Wolf "
+                       "covariance. The portfolio and its benchmarks are estimated with the same method; see the "
+                       "Backtest tab for what this strategy actually delivered.")
 
-        held = w[w > 0.005].sort_values()
-        f = go.Figure(go.Bar(y=[label(t) for t in held.index], x=held * 100, orientation="h",
-                             marker_color=[GREY if universe.at[t, "vehicle"] != "Stock" else NAVY for t in held.index]))
-        f.update_layout(xaxis_title="Weight (%)", title="Holdings (funds and cash in grey)")
-        st.plotly_chart(fig_layout(f, max(400, 24 * len(held))), width="stretch")
+            st.markdown("### Efficient frontier")
+            try:
+                front, free = frontiers(profile, cons_json, confidence)
+            except EXPECTED_ERRORS as exc:
+                st.error(f"The efficient frontier could not be computed: {exc}")
+                front = None
+            if front is not None:
+                cap = cons_spec["max_volatility"]["params"]["limit"]
+                free_at_cap = float(np.interp(res.volatility, free["volatility"], free["expected_return"]))
+                cost_bps = max(free_at_cap - res.expected_return, 0.0) * 1e4
+                f1, f2 = st.columns([3, 2], gap="large")
+                f = go.Figure([
+                    go.Scatter(x=free["volatility"] * 100, y=free["expected_return"] * 100, name="Without client constraints",
+                               line=dict(color=GREY, width=2, dash="dash")),
+                    go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
+                               name="With your constraints", line=dict(color=NAVY, width=3)),
+                    go.Scatter(x=[bench_stats["volatility"] * 100], y=[bench_stats["expected_return"] * 100],
+                               name=bench_label(profile), mode="markers",
+                               marker=dict(color=GREY, size=13, symbol="diamond", line=dict(color="white", width=1))),
+                    go.Scatter(x=[spy_stats["volatility"] * 100], y=[spy_stats["expected_return"] * 100], name="SPY",
+                               mode="markers", marker=dict(color=ACCENT, size=12, line=dict(color="white", width=1))),
+                    go.Scatter(x=[res.volatility * 100], y=[res.expected_return * 100], name="Recommended portfolio",
+                               mode="markers", marker=dict(color=NAVY, size=18, symbol="star", line=dict(color="white", width=1)))])
+                f.add_vline(x=cap * 100, line=dict(color=NAVY, width=1, dash="dot"),
+                            annotation_text=f"Risk budget {cap:.0%}", annotation_position="top left")
+                f.update_layout(title="Best expected return for each level of risk", xaxis_title="Expected volatility (% p.a.)",
+                                yaxis_title="Expected return above T-bill (% p.a.)")
+                f1.plotly_chart(fig_layout(f, 430), width="stretch")
+                mix = front.set_index("volatility")[fr.CLASS_ORDER].rename(columns=CLASS_LABELS) * 100
+                g = go.Figure([go.Scatter(x=mix.index * 100, y=mix[c], name=c, stackgroup="one", mode="none", fillcolor=clr)
+                               for c, clr in zip(mix.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+                g.add_vline(x=cap * 100, line=dict(color="white", width=2, dash="dot"))
+                g.update_layout(title="Allocation along the frontier", xaxis_title="Expected volatility (% p.a.)",
+                                yaxis_title="% of portfolio", yaxis_range=[0, 100])
+                f2.plotly_chart(fig_layout(g, 430), width="stretch")
+                st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
+                           f"risk. The recommended portfolio (star) is the point at the risk budget. At this risk, "
+                           f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
+                           "year: that is what diversification limits, the bond floor and the other rules cost on these "
+                           "estimates, in exchange for a sturdier portfolio. Without constraints the curve starts at cash "
+                           "(zero risk) and is almost a straight line: mixing cash with the best risky portfolio, as on "
+                           "the capital market line. The benchmark and SPY sit below the curve: "
+                           "for the same estimated risk, an optimised mix of the universe expects more (before "
+                           "estimation error; see the Backtest tab).")
 
-        with st.expander("Full allocation in USD"):
-            table = pd.DataFrame({"Asset": [label(t) for t in w.index], "Class": uni["asset_class"].values,
-                                  "Sector / type": np.where(is_bond, uni["bond_type"], uni["sector"]),
-                                  "Weight": w.values, "Amount (USD)": w.values * wealth,
-                                  "Liquidity": uni["liquidity_tier"].values,
-                                  "Trading cost (bps)": uni["tc_bps"].values}, index=w.index)
-            shown = table[table["Weight"] > 1e-4].sort_values("Weight", ascending=False)
-            dust = table.loc[(table["Weight"] > 0) & (table["Weight"] <= 1e-4), ["Weight", "Amount (USD)"]].sum()
-            if dust["Weight"] > 0:  # solver residuals: listed as one line so the table sums to 100%
-                shown.loc["_other"] = {"Asset": "Other positions below 0.01%", "Class": "", "Sector / type": "",
-                                       "Weight": dust["Weight"], "Amount (USD)": dust["Amount (USD)"],
-                                       "Liquidity": "", "Trading cost (bps)": np.nan}
-            st.dataframe(shown.style.format({"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x),
-                                             "Trading cost (bps)": lambda x: "" if pd.isna(x) else f"{x:.0f}"}),
-                         hide_index=True, width="stretch")
-            st.caption("Trading cost = estimated cost of buying or selling one dollar of the asset (spread and "
-                       "market impact), by liquidity tier: stocks by average daily dollar volume over the last "
-                       "12 months (2 / 5 / 10 bps), high-yield and EM bond funds 8 bps, other funds 3 bps, cash 0.")
-        with st.expander("Binding constraints"):
-            act = res.duals[res.duals["active"]]
-            st.caption("Gain in expected return (bps p.a.) if the bound were relaxed by 1 percentage point.")
-            st.dataframe(act[["constraint", "label", "bps_per_pp"]].rename(columns={
-                "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
-                {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
+        with sub_alloc:
+            b_eq = spec_p.benchmark_equity
+            by_class = pd.DataFrame({"Portfolio": w.groupby(uni["asset_class"]).sum(),
+                                     "Benchmark": pd.Series({"Equity": b_eq, "Bond": 1 - b_eq})}).reindex(CLASS_ORDER).fillna(0)
+            by_class.index = by_class.index.map(CLASS_LABELS)
+            by_sector = w[is_eq].groupby(uni.loc[is_eq, "sector"]).sum().sort_values(ascending=False)
+            b1, b3 = st.columns(2)
+            b1.plotly_chart(fig_layout(grouped_bars(by_class, "By asset class"), 340), width="stretch")
+            f = go.Figure(go.Bar(x=by_sector.index, y=by_sector * 100, marker_color=NAVY))
+            f.update_layout(title=f"Equities by sector ({by_sector.sum():.0%} of the portfolio)", yaxis_title="% of portfolio")
+            b3.plotly_chart(fig_layout(f, 340), width="stretch")
+            em = w[is_eq & uni["is_EM"]].sum()
+            st.markdown(f"**Emerging markets:** {pct(em)} of the portfolio, {pct(em / max(w[is_eq].sum(), 1e-12))} of equities. "
+                        f"**Cash:** {pct(w[uni['asset_class'] == 'Cash'].sum())}. **Positions above 0.5%:** {(w > 0.005).sum()}.")
 
-with tabs[3], guarded("Backtest"):
+        with sub_bonds:
+            bs = bonds.sleeve_summary(w, universe)
+            if bs["share"] <= 0:
+                st.info("No bonds in this portfolio.")
+            else:
+                c = st.columns(5)
+                c[0].metric("Bonds in the portfolio", pct(bs["share"]))
+                c[1].metric("Average duration", f"{bs['duration']:.1f} years")
+                c[2].metric("Average rating", bs["avg_rating"])
+                c[3].metric("Investment grade", pct(bs["ig_share"]), help="Share of the bond portfolio")
+                c[4].metric("High yield incl. EM", pct(bs["hy_share_of_portfolio"]), help="Share of the whole portfolio")
+                g1, g2, g3 = st.columns(3)
+                for col, key, title in ((g1, "by_issuer", "By issuer type"), (g2, "by_maturity", "By maturity"),
+                                        (g3, "by_quality", "By credit quality")):
+                    s_ = bs[key]
+                    f = go.Figure(go.Bar(x=s_.index, y=s_ * 100, marker_color=NAVY))
+                    f.update_layout(title=title, yaxis_title="% of bonds")
+                    col.plotly_chart(fig_layout(f, 300), width="stretch")
+                st.dataframe(bs["funds"].style.format({"Duration": "{:.1f}", "Weight": "{:.1%}", "Share of bonds": "{:.1%}"}),
+                             width="stretch")
+                st.caption("Duration and ratings are the funds' current fact-sheet values (iShares, State Street, "
+                           "Vanguard, Sept./Oct. 2026), applied to the whole history. Maturity buckets use the average "
+                           "maturity: <1y ultra-short, 1-5y short, 5-10y intermediate, 10y+ long.")
+
+        with sub_holdings:
+            held = w[w > 0.005].sort_values()
+            f = go.Figure(go.Bar(y=[label(t) for t in held.index], x=held * 100, orientation="h",
+                                 marker_color=[GREY if universe.at[t, "vehicle"] != "Stock" else NAVY for t in held.index]))
+            f.update_layout(xaxis_title="Weight (%)", title="Holdings (funds and cash in grey)")
+            st.plotly_chart(fig_layout(f, max(400, 24 * len(held))), width="stretch")
+
+            with st.expander("Full allocation in USD"):
+                table = pd.DataFrame({"Asset": [label(t) for t in w.index], "Class": uni["asset_class"].values,
+                                      "Sector / type": np.where(is_bond, uni["bond_type"], uni["sector"]),
+                                      "Weight": w.values, "Amount (USD)": w.values * wealth,
+                                      "Liquidity": uni["liquidity_tier"].values,
+                                      "Trading cost (bps)": uni["tc_bps"].values}, index=w.index)
+                shown = table[table["Weight"] > 1e-4].sort_values("Weight", ascending=False)
+                dust = table.loc[(table["Weight"] > 0) & (table["Weight"] <= 1e-4), ["Weight", "Amount (USD)"]].sum()
+                if dust["Weight"] > 0:  # solver residuals: listed as one line so the table sums to 100%
+                    shown.loc["_other"] = {"Asset": "Other positions below 0.01%", "Class": "", "Sector / type": "",
+                                           "Weight": dust["Weight"], "Amount (USD)": dust["Amount (USD)"],
+                                           "Liquidity": "", "Trading cost (bps)": np.nan}
+                st.dataframe(shown.style.format({"Weight": "{:.2%}", "Amount (USD)": lambda x: usd(x),
+                                                 "Trading cost (bps)": lambda x: "" if pd.isna(x) else f"{x:.0f}"}),
+                             hide_index=True, width="stretch")
+                st.caption("Trading cost = estimated cost of buying or selling one dollar of the asset (spread and "
+                           "market impact), by liquidity tier: stocks by average daily dollar volume over the last "
+                           "12 months (2 / 5 / 10 bps), high-yield and EM bond funds 8 bps, other funds 3 bps, cash 0.")
+            with st.expander("Binding constraints"):
+                act = res.duals[res.duals["active"]]
+                st.caption("Gain in expected return (bps p.a.) if the bound were relaxed by 1 percentage point.")
+                st.dataframe(act[["constraint", "label", "bps_per_pp"]].rename(columns={
+                    "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
+                    {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
+
+with tabs[2], guarded("Backtest"):
     st.subheader(f"Backtest — {profile} profile with the client constraints")
     c1, _ = st.columns([1, 3])
-    freq = c1.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
+    with c1.container(key="bt-rebalance"):
+        freq = st.selectbox("Rebalancing", list(btm.FREQ_MONTHS), key="bt.freq")
     try:
         bt, ew, series = run_backtest(profile, cons_json, freq, confidence)
     except EXPECTED_ERRORS as exc:
@@ -488,26 +713,10 @@ with tabs[3], guarded("Backtest"):
                 "guarantee future returns.")
         for ev in bt.events:
             st.warning(ev)
+
+        # Charts first (user-requested reorder: visuals before tables).
         metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
         metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
-        st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
-                                             "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
-            {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
-             "Final wealth (USD)": lambda x: usd(x)}),
-            width="stretch")
-        if spec_p.benchmark_equity >= 1:
-            st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")
-        # separate table: turnover and costs only exist for the two portfolios we trade (an empty
-        # cell for the index benchmarks would show as "None")
-        trading = pd.DataFrame({"Turnover p.a.": [btm.annual_turnover(bt), btm.annual_turnover(ew)],
-                                "Trading costs p.a.": [btm.annual_cost(bt), btm.annual_cost(ew)]},
-                               index=["Strategy", EW_LABEL])
-        t1, _ = st.columns([2, 3])
-        t1.dataframe(trading.style.format({"Turnover p.a.": "{:.0%}",
-                                           "Trading costs p.a.": lambda x: f"{x * 1e4:.1f} bps"}), width="stretch")
-        t1.caption("Turnover = buys + sells per year as a share of the portfolio (initial purchase excluded); "
-                   "trading costs include the initial purchase.")
-
         growth = wealth * (1 + series).cumprod()
         styles = (("Strategy", NAVY, 3, "solid"), (EW_LABEL, "#7f9cb8", 2, "dash"), (bench_label(profile), GREY, 2, "solid"),
                   ("SPY", ACCENT, 2, "dot"))
@@ -540,7 +749,28 @@ with tabs[3], guarded("Backtest"):
         f.update_layout(title="Allocation by asset class over time (month-end, after drift)", yaxis_title="%",
                         yaxis_range=[0, 100])
         st.plotly_chart(fig_layout(f, 360), width="stretch")
-with tabs[4], guarded("Simulation"):
+
+        # Tables after charts.
+        st.markdown("#### Results")
+        st.dataframe(metrics.rename(columns={"annual_return": "Annual return", "volatility": "Volatility",
+                                             "sharpe": "Sharpe ratio", "max_drawdown": "Max drawdown"}).style.format(
+            {"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}", "Max drawdown": "{:.1%}",
+             "Final wealth (USD)": lambda x: usd(x)}),
+            width="stretch")
+        if spec_p.benchmark_equity >= 1:
+            st.caption("The Dynamic profile's benchmark is 100% SPY, so its row is identical to SPY.")
+        # separate table: turnover and costs only exist for the two portfolios we trade (an empty
+        # cell for the index benchmarks would show as "None")
+        trading = pd.DataFrame({"Turnover p.a.": [btm.annual_turnover(bt), btm.annual_turnover(ew)],
+                                "Trading costs p.a.": [btm.annual_cost(bt), btm.annual_cost(ew)]},
+                               index=["Strategy", EW_LABEL])
+        t1, _ = st.columns([2, 3])
+        t1.dataframe(trading.style.format({"Turnover p.a.": "{:.0%}",
+                                           "Trading costs p.a.": lambda x: f"{x * 1e4:.1f} bps"}), width="stretch")
+        t1.caption("Turnover = buys + sells per year as a share of the portfolio (initial purchase excluded); "
+                   "trading costs include the initial purchase.")
+
+with tabs[3], guarded("Simulation"):
     st.subheader(f"Wealth simulation — {profile} profile, starting with {usd(wealth)}")
     if require_ok(res):
         years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")
@@ -605,44 +835,3 @@ with tabs[4], guarded("Simulation"):
                        "survivorship bias of the stock list (today's winners, picked with hindsight), so the "
                        "portfolio's outcomes are somewhat optimistic; the benchmark's are not.")
 
-# --- About Us --------------------------------------------------------------------------------
-
-def avatar_html(member: team.Member, size: int = 112) -> str:
-    """Round photo, or a round avatar with the initials when the photo is missing."""
-    uri = team.photo_data_uri(member)
-    style = f"width:{size}px;height:{size}px;border-radius:50%;margin:0.25rem auto 0.75rem auto;display:block;"
-    if uri:
-        return f'<img src="{uri}" alt="{html.escape(member.name)}" style="{style}object-fit:cover;">'
-    return (f'<div style="{style}background:{NAVY};color:#ffffff;display:flex;align-items:center;'
-            f'justify-content:center;font-size:{size // 3}px;font-weight:600;letter-spacing:1px;">'
-            f'{html.escape(team.initials(member.name))}</div>')
-
-
-with tabs[5], guarded("About Us"):
-    st.subheader("About this project")
-    st.markdown(
-        "We play the role of an **international private bank** advising clients whose reference currency is "
-        "the US dollar. The app turns a short suitability questionnaire into a risk profile, then builds the "
-        "portfolio with the highest expected return that stays within the client's volatility budget and "
-        "investment constraints. Every recommendation is backtested and its future range of outcomes simulated, "
-        "so the client can see both the potential and the risks. It was built for the course *Quantitative "
-        "Asset and Risk Management II* at HEC Lausanne.")
-    members, repository, team_error = team.load_team()
-    if team_error:
-        st.warning(team_error)
-    st.markdown("#### The team")
-    for start in range(0, len(members), 3):
-        cols = st.columns(3, gap="medium")
-        for col, m in zip(cols, members[start:start + 3]):
-            with col.container(border=True):
-                st.markdown(avatar_html(m), unsafe_allow_html=True)
-                st.markdown(f'<div style="text-align:center;font-weight:600;font-size:1.1rem;">{html.escape(m.name)}</div>'
-                            f'<div style="text-align:center;color:{NAVY};font-size:0.9rem;margin-bottom:0.5rem;">'
-                            f'{html.escape(m.role)}</div>'
-                            f'<div style="text-align:center;color:#4a5560;font-size:0.9rem;">{html.escape(m.description)}</div>',
-                            unsafe_allow_html=True)
-                if m.linkedin:
-                    st.markdown(f'<div style="text-align:center;margin-top:0.5rem;"><a href="{html.escape(m.linkedin)}" '
-                                f'target="_blank">LinkedIn</a></div>', unsafe_allow_html=True)
-    if repository:
-        st.markdown(f"Source code: [{repository}]({repository})")
