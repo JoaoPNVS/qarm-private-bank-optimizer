@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import os
 from contextlib import contextmanager
 
 import numpy as np
@@ -18,7 +19,46 @@ st.set_page_config(page_title="Private Client Portfolio Optimizer", layout="wide
                    initial_sidebar_state="collapsed")
 
 # Dark theme only — chart palette tuned for readability on the dark navy background.
-NAVY, GREY, ACCENT = "#7bace0", "#8f9bac", "#e07f6b"
+# Colour themes: page colours (CSS variables) and chart palette in one place. The page colours of
+# Streamlit's own widgets come from .streamlit/config.toml, which must use the same base (light/dark).
+THEMES = {
+    "night": {"base": "dark", "bg": "#0d1a2b", "surface": "#122238", "surface_2": "#1a2d47", "border": "#2b4466",
+              "text": "#e6ecf5", "text_dim": "#9aa9bf", "accent": "#5a92c4", "accent_hover": "#7bace0",
+              "accent_soft": "rgba(90,146,196,0.12)", "hover": "rgba(255,255,255,0.08)",
+              "shadow": "0 8px 32px rgba(0,0,0,0.5)", "dock_bg": "rgba(26,45,71,0.95)", "dock_border": "rgba(123,172,224,0.35)",
+              "dock_shadow": "0 12px 40px rgba(0,0,0,0.6), 0 0 32px rgba(90,146,196,0.18)",
+              "plotly": "plotly_dark", "chart_text": "#e6ecf5",
+              "navy": "#7bace0", "grey": "#8f9bac", "red": "#e07f6b", "ew": "#b39ddb", "bond": "#3f6694",
+              "gold": "#c9a227", "cash": "#d9d9d9", "fill_main": "rgba(123,172,224,0.28)", "fill_bench": "rgba(143,155,172,0.20)"},
+    "slate": {"base": "dark", "bg": "#1c2838", "surface": "#243349", "surface_2": "#2d3f58", "border": "#3d5373",
+              "text": "#eef2f7", "text_dim": "#b0bccd", "accent": "#6aa0d4", "accent_hover": "#8bb8e3",
+              "accent_soft": "rgba(106,160,212,0.14)", "hover": "rgba(255,255,255,0.08)",
+              "shadow": "0 8px 28px rgba(0,0,0,0.35)", "dock_bg": "rgba(45,63,88,0.96)", "dock_border": "rgba(139,184,227,0.35)",
+              "dock_shadow": "0 10px 32px rgba(0,0,0,0.45)",
+              "plotly": "plotly_dark", "chart_text": "#eef2f7",
+              "navy": "#8bb8e3", "grey": "#a3afbf", "red": "#e8907d", "ew": "#c3b1e1", "bond": "#4f79a8",
+              "gold": "#d4b041", "cash": "#e3e3e3", "fill_main": "rgba(139,184,227,0.28)", "fill_bench": "rgba(163,175,191,0.20)"},
+    "mist": {"base": "light", "bg": "#eef2f7", "surface": "#ffffff", "surface_2": "#e4eaf2", "border": "#c9d3e0",
+             "text": "#1c2833", "text_dim": "#55657a", "accent": "#2f5f8f", "accent_hover": "#3d73a8",
+             "accent_soft": "rgba(47,95,143,0.10)", "hover": "rgba(28,40,51,0.06)",
+             "shadow": "0 6px 22px rgba(28,40,51,0.12)", "dock_bg": "rgba(255,255,255,0.96)", "dock_border": "rgba(47,95,143,0.30)",
+             "dock_shadow": "0 10px 30px rgba(28,40,51,0.18)",
+             "plotly": "plotly_white", "chart_text": "#1c2833",
+             "navy": "#1f4e79", "grey": "#7f8c9d", "red": "#c0392b", "ew": "#7e57c2", "bond": "#8fb3d9",
+             "gold": "#b8860b", "cash": "#b8bfca", "fill_main": "rgba(31,78,121,0.20)", "fill_bench": "rgba(127,140,157,0.20)"},
+    "ivory": {"base": "light", "bg": "#f6f4ef", "surface": "#ffffff", "surface_2": "#eeeae2", "border": "#d9d3c7",
+              "text": "#1f2a37", "text_dim": "#62666d", "accent": "#1f3b57", "accent_hover": "#2e5580",
+              "accent_soft": "rgba(31,59,87,0.08)", "hover": "rgba(31,42,55,0.06)",
+              "shadow": "0 6px 22px rgba(31,42,55,0.10)", "dock_bg": "rgba(255,255,255,0.96)", "dock_border": "rgba(31,59,87,0.25)",
+              "dock_shadow": "0 10px 30px rgba(31,42,55,0.16)",
+              "plotly": "plotly_white", "chart_text": "#1f2a37",
+              "navy": "#1f3b57", "grey": "#8a9099", "red": "#b03a2e", "ew": "#7e57c2", "bond": "#9db7d1",
+              "gold": "#b08d2f", "cash": "#c4c0b8", "fill_main": "rgba(31,59,87,0.18)", "fill_bench": "rgba(138,144,153,0.20)"},
+}
+THEME = THEMES[os.environ.get("APP_THEME", "mist")]
+NAVY, GREY, ACCENT = THEME["navy"], THEME["grey"], THEME["red"]
+EW_COLOR, BOND_COLOR, GOLD_COLOR, CASH_COLOR = THEME["ew"], THEME["bond"], THEME["gold"], THEME["cash"]
+CLASS_COLORS = [NAVY, BOND_COLOR, GOLD_COLOR, CASH_COLOR]  # Equity, Bond, Commodity, Cash
 CLASS_ORDER = ["Equity", "Bond", "Commodity", "Cash"]
 CLASS_LABELS = {"Equity": "Equities", "Bond": "Bonds", "Commodity": "Gold", "Cash": "Cash & equivalents"}
 WINDOW = est.DEFAULT_WINDOW
@@ -68,11 +108,11 @@ def bench_label(profile: str) -> str:
 
 def fig_layout(fig, height=380):
     # legend below the plot: above it, it collided with the title and wrapped over narrow charts
-    fig.update_layout(template="plotly_dark",
+    fig.update_layout(template=THEME["plotly"],
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       height=height, margin=dict(l=10, r=10, t=50, b=110),
                       legend=dict(orientation="h", yanchor="top", y=-0.42, x=0, xanchor="left"),
-                      font=dict(size=13, color="#e6ecf5"), title=dict(x=0, xanchor="left"))
+                      font=dict(size=13, color=THEME["chart_text"]), title=dict(x=0, xanchor="left"))
     return fig
 
 
@@ -239,10 +279,11 @@ if st.session_state.get("profile") not in ("auto", *prof.PROFILES):
 # Accordion renders only one question's radio at a time; Streamlit garbage-collects widget state
 # when the widget isn't rendered this run, which would reset previous answers. Re-asserting the
 # value here prevents the GC and keeps the Resulting profile stable across accordion switches.
+# Defaults are set here (not with index= on the radio): a widget with both a default and a value set
+# through the Session State API makes Streamlit log a warning.
 for _q in prof.QUESTIONS:
     _k = f"q.{_q.key}"
-    if _k in st.session_state:
-        st.session_state[_k] = st.session_state[_k]
+    st.session_state[_k] = st.session_state.get(_k, 1)
 
 
 def _toggle_question(key: str) -> None:
@@ -250,9 +291,8 @@ def _toggle_question(key: str) -> None:
 
 
 _tv = {
-    "bg": "#0d1a2b", "surface": "#122238", "surface_2": "#1a2d47", "border": "#2b4466",
-    "text": "#e6ecf5", "text_dim": "#9aa9bf", "accent": "#5a92c4", "accent_hover": "#7bace0",
-    "shadow": "0 8px 32px rgba(0,0,0,0.5)", "dock_bg": "rgba(26,45,71,0.95)",
+    k_: THEME[k_] for k_ in ("bg", "surface", "surface_2", "border", "text", "text_dim", "accent", "accent_hover",
+                             "accent_soft", "hover", "shadow", "dock_bg", "dock_border", "dock_shadow")
 }
 
 st.markdown(f"""
@@ -264,7 +304,8 @@ st.markdown(f"""
   --bg: {_tv['bg']}; --surface: {_tv['surface']}; --surface-2: {_tv['surface_2']};
   --border: {_tv['border']}; --text: {_tv['text']}; --text-dim: {_tv['text_dim']};
   --accent: {_tv['accent']}; --accent-hover: {_tv['accent_hover']};
-  --shadow: {_tv['shadow']}; --dock-bg: {_tv['dock_bg']};
+  --shadow: {_tv['shadow']}; --dock-bg: {_tv['dock_bg']}; --dock-border: {_tv['dock_border']};
+  --dock-shadow: {_tv['dock_shadow']}; --accent-soft: {_tv['accent_soft']}; --hover: {_tv['hover']};
   --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
   --font-serif: 'IBM Plex Serif', Georgia, serif;
 }}
@@ -303,9 +344,9 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
   position: fixed !important; bottom: 24px !important; left: 50% !important;
   transform: translateX(-50%) !important; width: auto !important; max-width: 92vw !important;
   background: var(--dock-bg) !important; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(123,172,224,0.35) !important; border-radius: 999px !important;
+  border: 1px solid var(--dock-border) !important; border-radius: 999px !important;
   padding: 10px 14px !important;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(123,172,224,0.08), 0 0 32px rgba(90,146,196,0.18) !important;
+  box-shadow: var(--dock-shadow) !important;
   z-index: 1000 !important; gap: 8px !important; justify-content: center !important;
   display: flex !important;
 }}
@@ -316,18 +357,18 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
   border: none !important; transition: background 0.15s, color 0.15s, transform 0.15s;
   min-width: 170px !important; text-align: center !important;
 }}
-.st-key-main-nav [role="tab"]:hover {{ background: rgba(255,255,255,0.08) !important; transform: translateY(-1px); }}
+.st-key-main-nav [role="tab"]:hover {{ background: var(--hover) !important; transform: translateY(-1px); }}
 .st-key-main-nav [role="tab"][aria-selected="true"] {{
   background: var(--accent) !important; color: #ffffff !important; font-weight: 600 !important;
-  box-shadow: 0 4px 14px rgba(90,146,196,0.45) !important;
+  box-shadow: 0 4px 14px var(--accent-soft) !important;
 }}
-/* Sub-tabs inside Portfolio: bright orange bordered pill group */
+/* Sub-tabs inside Portfolio: accent-bordered pill group */
 .st-key-portfolio-subtabs [role="tablist"] {{
   position: static !important; transform: none !important;
   background: var(--surface) !important;
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-  border: 2px solid #e07f6b !important; border-radius: 10px !important;
-  box-shadow: 0 0 0 1px rgba(224,127,107,0.15) !important;
+  border: 2px solid var(--accent) !important; border-radius: 10px !important;
+  box-shadow: 0 0 0 1px var(--accent-soft) !important;
   padding: 5px !important; width: fit-content !important; max-width: none !important;
   gap: 2px !important; justify-content: flex-start !important;
   margin: 0.5rem 0 1.5rem !important;
@@ -340,24 +381,28 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
   min-width: unset !important;
 }}
 .st-key-portfolio-subtabs [role="tab"]:hover {{
-  background: rgba(224,127,107,0.08) !important; color: var(--text) !important;
+  background: var(--accent-soft) !important; color: var(--text) !important;
 }}
 .st-key-portfolio-subtabs [role="tab"][aria-selected="true"] {{
-  background: #e07f6b !important; color: #ffffff !important;
+  background: var(--accent) !important; color: #ffffff !important;
   border-bottom: none !important; border-radius: 6px !important;
   box-shadow: none !important; font-weight: 600 !important;
 }}
+/* Selected tab label stays white on the accent background (the global p colour rule would win otherwise) */
+.st-key-main-nav [role="tab"][aria-selected="true"] *, .st-key-portfolio-subtabs [role="tab"][aria-selected="true"] * {{
+  color: #ffffff !important;
+}}
 /* Kill the react-aria selection indicator (thin blue bar under the active tab) */
 .react-aria-SelectionIndicator {{ display: none !important; }}
-/* Backtest "Rebalancing" selectbox — orange theme to match the sub-tabs */
-.st-key-bt-rebalance label p {{ color: #e07f6b !important; font-weight: 600 !important; }}
+/* Backtest "Rebalancing" selectbox — accent colour to match the sub-tabs */
+.st-key-bt-rebalance label p {{ color: var(--accent) !important; font-weight: 600 !important; }}
 .st-key-bt-rebalance [data-baseweb="select"] > div {{
   background: var(--surface) !important;
-  border: 2px solid #e07f6b !important; border-radius: 10px !important;
-  box-shadow: 0 0 0 1px rgba(224,127,107,0.15) !important;
+  border: 2px solid var(--accent) !important; border-radius: 10px !important;
+  box-shadow: 0 0 0 1px var(--accent-soft) !important;
 }}
 .st-key-bt-rebalance [data-baseweb="select"] > div:hover {{
-  border-color: #f09a85 !important;
+  border-color: var(--accent-hover) !important;
 }}
 .st-key-bt-rebalance [data-baseweb="select"] input,
 .st-key-bt-rebalance [data-baseweb="select"] div[role="combobox"] {{
@@ -375,6 +420,19 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
   white-space: nowrap !important; overflow: visible !important;
 }}
 .st-key-top-controls button:hover {{ background: var(--surface-2) !important; }}
+/* Hide the floating nav while the About Us dialog is open (it sat on top of the dialog) */
+body:has([role="dialog"]) .st-key-main-nav [role="tablist"] {{ display: none !important; }}
+/* Narrow screens (phones, small windows): all five nav buttons must fit */
+@media (max-width: 820px) {{
+  .st-key-main-nav [role="tablist"] {{ bottom: 12px !important; padding: 6px !important; gap: 2px !important;
+    width: calc(100vw - 24px) !important; max-width: none !important; justify-content: space-between !important; }}
+  .st-key-main-nav [role="tab"] {{ min-width: 0 !important; flex: 1 1 0 !important; padding: 8px 2px !important;
+    font-size: 0.74rem !important; line-height: 1.15 !important; white-space: normal !important; }}
+  .st-key-portfolio-subtabs [role="tablist"] {{ width: auto !important; flex-wrap: wrap !important; }}
+  .st-key-portfolio-subtabs [role="tab"] {{ flex: 0 0 auto !important; padding: 6px 12px !important; font-size: 0.85rem !important; }}
+  .st-key-top-controls {{ top: 8px !important; right: 8px !important; }}
+  .block-container {{ padding-bottom: 96px !important; }}
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -477,7 +535,7 @@ with tabs[0], guarded("Client Profile"):
                 with st.container(border=True):
                     st.radio(q.text, list(range(len(q.options))),
                              format_func=lambda i, q=q: q.options[i],
-                             key=f"q.{q.key}", index=1, label_visibility="collapsed")
+                             key=f"q.{q.key}", label_visibility="collapsed")
     with right:
         a = prof.assess({q.key: st.session_state.get(f"q.{q.key}", 1) for q in prof.QUESTIONS})
         sp = prof.SPECS[a.profile]
@@ -515,13 +573,8 @@ stock_tickers = [t for t in universe.index if universe.at[t, "vehicle"] == "Stoc
 sectors = sorted(universe.loc[universe["asset_class"] == "Equity", "sector"].unique())
 
 with tabs[1], guarded("Portfolio"):
-    # Sub-tabs at the very top of the Portfolio view; wrapped in a keyed container so our CSS
-    # can target them unambiguously (the generic .stTabs .stTabs selector was not matching).
-    with st.container(key="portfolio-subtabs"):
-        sub_overview, sub_alloc, sub_bonds, sub_holdings = st.tabs(
-            ["Overview", "Allocation", "Bonds", "Holdings"])
-    status_box = st.container()
-
+    # Constraints first, so "what if" changes are one click away during the pitch; the status line
+    # (binding constraints, or the conflict) sits right under them, above the results.
     with st.expander(f"Adjust constraints ({profile} defaults)", expanded=False):
         k = lambda name: f"{profile}.{name}"  # noqa: E731  (each profile keeps its own settings)
 
@@ -579,6 +632,11 @@ with tabs[1], guarded("Portfolio"):
                    "equity funds (VGK, EWJ, EEM) count as one sector. Bond funds and gold are not subject to "
                    "the sector limit. Bond durations and ratings are the funds' current fact-sheet values. "
                    "High yield = HYG and the emerging-market bond fund EMB.")
+    status_box = st.container()
+    # Sub-tabs wrapped in a keyed container so our CSS can target them unambiguously.
+    with st.container(key="portfolio-subtabs"):
+        sub_overview, sub_alloc, sub_bonds, sub_holdings = st.tabs(
+            ["Overview", "Allocation", "Bonds", "Holdings"])
 
     cons_json = json.dumps(cons_spec, sort_keys=True)
     try:
@@ -649,13 +707,13 @@ with tabs[1], guarded("Portfolio"):
                     go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
                                name="With your constraints", line=dict(color=NAVY, width=3)),
                     go.Scatter(x=cml_x * 100, y=cml_x * tangency["sharpe"] * 100, name="Capital market line",
-                               line=dict(color="#c9a227", width=1.5, dash="dot")),
+                               line=dict(color=GOLD_COLOR, width=1.5, dash="dot")),
                     go.Scatter(x=[gmv["volatility"] * 100], y=[gmv["expected_return"] * 100], name="Minimum variance",
                                mode="markers", marker=dict(color="white", size=11, symbol="circle",
                                                            line=dict(color=NAVY, width=2))),
                     go.Scatter(x=[tangency["volatility"] * 100], y=[tangency["expected_return"] * 100],
                                name="Maximum Sharpe (tangency)", mode="markers",
-                               marker=dict(color="#c9a227", size=13, symbol="triangle-up", line=dict(color="white", width=1))),
+                               marker=dict(color=GOLD_COLOR, size=13, symbol="triangle-up", line=dict(color="white", width=1))),
                     go.Scatter(x=[bench_stats["volatility"] * 100], y=[bench_stats["expected_return"] * 100],
                                name=bench_label(profile), mode="markers",
                                marker=dict(color=GREY, size=13, symbol="diamond", line=dict(color="white", width=1))),
@@ -670,7 +728,7 @@ with tabs[1], guarded("Portfolio"):
                 f1.plotly_chart(fig_layout(f, 430), width="stretch")
                 mix = front.set_index("volatility")[fr.CLASS_ORDER].rename(columns=CLASS_LABELS) * 100
                 g = go.Figure([go.Scatter(x=mix.index * 100, y=mix[c], name=c, stackgroup="one", mode="none", fillcolor=clr)
-                               for c, clr in zip(mix.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+                               for c, clr in zip(mix.columns, CLASS_COLORS)])
                 g.add_vline(x=cap * 100, line=dict(color="white", width=2, dash="dot"))
                 g.update_layout(title="Allocation along the frontier", xaxis_title="Expected volatility (% p.a.)",
                                 yaxis_title="% of portfolio", yaxis_range=[0, 100])
@@ -890,7 +948,8 @@ with tabs[2], guarded("Insider Signal"):
             go.Scatter(x=spy_growth.index, y=spy_growth, name="SPY, growth of 1 USD (right axis)", yaxis="y2",
                        line=dict(color=ACCENT, width=1.5))])
         f.update_layout(title="Insiders buy when markets are low", yaxis_title="% of companies with insider purchases",
-                        yaxis2=dict(overlaying="y", side="right", type="log", showgrid=False, title="SPY (log)"))
+                        yaxis2=dict(overlaying="y", side="right", type="log", showgrid=False, title="SPY (log)",
+                                    tickvals=[1, 2, 4, 8], ticktext=["1", "2", "4", "8"]))
         st.plotly_chart(fig_layout(f, 420), width="stretch")
         st.caption("Breadth = among the US listed companies whose officers or directors bought or sold their own "
                    "shares on the open market over the last 3 months, the share with purchases (counting companies, "
@@ -981,6 +1040,17 @@ with tabs[3], guarded("Backtest"):
         bt = None
     if bt is not None:
         start, end = series.index[0], series.index[-1]
+        metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
+        metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
+        s_, b_ = metrics.loc["Strategy"], metrics.loc[bench_label(profile)]
+        h = st.columns(4)
+        h[0].metric("Annual return", pct(s_["annual_return"]),
+                    f"{(s_['annual_return'] - b_['annual_return']) * 100:+.1f} pp vs benchmark")
+        h[1].metric("Volatility", pct(s_["volatility"]),
+                    f"{(s_['volatility'] - b_['volatility']) * 100:+.1f} pp vs benchmark", delta_color="inverse")
+        h[2].metric("Sharpe ratio", f"{s_['sharpe']:.2f}", f"{s_['sharpe'] - b_['sharpe']:+.2f} vs benchmark")
+        h[3].metric("Max drawdown", pct(s_["max_drawdown"]),
+                    f"{(s_['max_drawdown'] - b_['max_drawdown']) * 100:+.1f} pp vs benchmark")
         with st.container(border=True):
             st.markdown("#### How to read these results")
             st.markdown(
@@ -996,11 +1066,9 @@ with tabs[3], guarded("Backtest"):
         for ev in bt.events:
             st.warning(ev)
 
-        # Charts first (user-requested reorder: visuals before tables).
-        metrics = pd.DataFrame({k: risk.performance_metrics(series[k], rf) for k in series}).T
-        metrics["Final wealth (USD)"] = [wealth * (1 + series[k]).prod() for k in series]
+        # Charts first (user-requested reorder: visuals before tables); the headline numbers are above.
         growth = wealth * (1 + series).cumprod()
-        styles = (("Strategy", NAVY, 3, "solid"), (EW_LABEL, "#7f9cb8", 2, "dash"), (bench_label(profile), GREY, 2, "solid"),
+        styles = (("Strategy", NAVY, 3, "solid"), (EW_LABEL, EW_COLOR, 2, "dash"), (bench_label(profile), GREY, 2, "solid"),
                   ("SPY", ACCENT, 2, "dot"))
         f = go.Figure([go.Scatter(x=growth.index, y=growth[k], name=k, line=dict(color=clr, width=w_, dash=dash))
                        for k, clr, w_, dash in styles])
@@ -1027,7 +1095,7 @@ with tabs[3], guarded("Backtest"):
         alloc = bt.weights.T.groupby(universe.loc[bt.weights.columns, "asset_class"]).sum().T.reindex(columns=CLASS_ORDER)
         alloc.columns = alloc.columns.map(CLASS_LABELS)
         f = go.Figure([go.Scatter(x=alloc.index, y=alloc[c] * 100, name=c, stackgroup="one", mode="none",
-                                  fillcolor=clr) for c, clr in zip(alloc.columns, [NAVY, "#7f9cb8", "#c9a227", "#d9d9d9"])])
+                                  fillcolor=clr) for c, clr in zip(alloc.columns, CLASS_COLORS)])
         f.update_layout(title="Allocation by asset class over time (month-end, after drift)", yaxis_title="%",
                         yaxis_range=[0, 100])
         st.plotly_chart(fig_layout(f, 360), width="stretch")
@@ -1141,7 +1209,7 @@ with tabs[4], guarded("Simulation"):
                        "those years are on average. Expected shortfall is a coherent risk measure (combining two "
                        "portfolios never shows more risk than the two separately); VaR is not.")
             f = go.Figure()
-            for name, clr, fill in (("Benchmark", GREY, "rgba(163,173,184,0.25)"), ("Portfolio", NAVY, "rgba(31,59,87,0.20)")):
+            for name, clr, fill in (("Benchmark", GREY, THEME["fill_bench"]), ("Portfolio", NAVY, THEME["fill_main"])):
                 b = sim[name]["bands"]
                 x = b.index / 12
                 label_ = "Recommended portfolio" if name == "Portfolio" else bench_label(profile)
