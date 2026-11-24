@@ -221,7 +221,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   by golden-section search on the volatility cap (the Sharpe ratio along a concave frontier has one
   peak); capital market line from the T-bill (origin, returns are in excess) through it.
 
-## App (`app.py`, dark UI: five tabs in a floating bottom navigation, no sidebar)
+## App (`app.py`, light "mist" UI: five tabs in a floating bottom navigation, no sidebar)
 1. **Client Profile** — "Client settings" box (wealth, profile override, house view: insider trading
    or past performance, and its confidence; these inputs drive every tab), the questionnaire as an
    accordion, and the resulting profile with the reasons.
@@ -296,5 +296,8 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
   into errors. Known constraints: pandas 2.x (yfinance warns under pandas 3), numpy 2.3.x
   (pandas 2.3 resample warns under 2.5). matplotlib and fpdf2 were removed with the unused PDF
   report module.
-- Theme in `.streamlit/config.toml`: dark (navy background); the chart palette in `app.py` (NAVY, GREY,
-  ACCENT) is tuned for it and `fig_layout` uses plotly_dark with transparent backgrounds.
+- Colours: one `THEMES` table in `app.py` (night, slate, mist, ivory) holds the page colours (CSS
+  variables) and the chart palette; the active one is `mist` (light blue-grey, navy accent), chosen for
+  readability on a projector. `APP_THEME=<name>` overrides it for a preview. `.streamlit/config.toml`
+  must hold the same base and colours (Streamlit's own widgets read them). One accent colour only;
+  on narrow screens (< 820 px) the bottom navigation shrinks so all five tabs fit.
