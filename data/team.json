@@ -2,7 +2,7 @@
   "repository": "",
   "members": [
     {
-      "name": "Joao [NOM]",
+      "name": "Joao Neves",
       "role": "Project Lead & Portfolio Strategy",
       "description": "Coordinates the project and designs the overall portfolio construction approach.",
       "photo": "assets/team/joao.jpg",
@@ -30,16 +30,9 @@
       "linkedin": ""
     },
     {
-      "name": "Alexandre [NOM]",
-      "role": "Backtesting & Performance",
-      "description": "Runs the rolling backtests and compares the strategy with its benchmarks.",
-      "photo": "assets/team/alexandre.jpg",
-      "linkedin": ""
-    },
-    {
-      "name": "Dimitri [NOM]",
-      "role": "Risk & Monte Carlo Simulation",
-      "description": "Measures portfolio risk and simulates the client's future wealth.",
+      "name": "Dimitri Prouvost",
+      "role": "Risk Simulation & Interface Design",
+      "description": "Measures portfolio risk, simulates the client's future wealth, and designed the app's dark interface with its floating navigation.",
       "photo": "assets/team/dimitri.jpg",
       "linkedin": ""
     }
