@@ -9,21 +9,21 @@
       "linkedin": ""
     },
     {
-      "name": "Francisco [NOM]",
+      "name": "Francisco Lameiras dos Santos",
       "role": "Client Profiling & Suitability",
       "description": "Builds the suitability questionnaire and translates answers into risk profiles.",
       "photo": "assets/team/francisco_profiling.jpg",
       "linkedin": ""
     },
     {
-      "name": "Francisco [NOM]",
+      "name": "Francisco Gomez",
       "role": "Constraints & Optimization",
       "description": "Implements the client constraints and the volatility-capped optimisation.",
       "photo": "assets/team/francisco_optimization.jpg",
       "linkedin": ""
     },
     {
-      "name": "Ruben [NOM]",
+      "name": "Ruben Correia Pinto",
       "role": "Fixed Income",
       "description": "Designs the bond sleeve: segments, duration, credit quality and limits.",
       "photo": "assets/team/ruben.jpg",
