@@ -180,7 +180,7 @@ def test_black_litterman_feasible_at_every_rebalancing(inputs, bl_estimates, pro
     assert not res.events and (res.rebalances["status"] == "ok").all()
 
 
-def test_equilibrium_keeps_the_volatility_promise(inputs, bl_estimates):
+def test_equilibrium_realised_volatility_near_estimated_budget(inputs, bl_estimates):
     # documented result: with zero view confidence the realised volatility matches the 10% budget
     uni, ret, rf = inputs
     res = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"),
