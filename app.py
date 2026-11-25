@@ -878,10 +878,15 @@ with tabs[1], guarded("Portfolio"):
                            "12 months (2 / 5 / 10 bps), high-yield and EM bond funds 8 bps, other funds 3 bps, cash 0.")
             with st.expander("Binding constraints"):
                 act = res.duals[res.duals["active"]]
-                st.caption("Gain in expected return (bps p.a.) if the bound were relaxed by 1 percentage point.")
-                st.dataframe(act[["constraint", "label", "bps_per_pp"]].rename(columns={
-                    "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
-                    {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
+                st.caption("Gain in expected return (bps per year) if the bound were relaxed by one unit, in the "
+                           "bound's own unit: +1 percentage point of the portfolio, of the bond portfolio (investment "
+                           "grade) or of the equities (emerging markets), +1 year for the bond duration. A first-order "
+                           "estimate from the optimiser; n/a for an exclusion or a limit of 0%, where it is not defined.")
+                st.dataframe(act[["constraint", "label", "unit", "bps_per_unit"]].rename(columns={
+                    "constraint": "Constraint", "label": "Bound", "unit": "Relaxation",
+                    "bps_per_unit": "Gain (bps p.a.)"}).style.format(
+                    {"Gain (bps p.a.)": lambda x: "n/a" if pd.isna(x) else f"{x:.1f}"}), hide_index=True,
+                    width="stretch")
 
 # --- Insider Signal --------------------------------------------------------------------------
 
@@ -911,9 +916,10 @@ with tabs[2], guarded("Insider Signal"):
             c = st.columns(4)
             c[0].metric("Insider buying breadth", pct(view.buy_share, 0),
                         f"{(view.buy_share - hist.mean()) * 100:+.1f} pp vs 5-year average", delta_color="off",
-                        help=f"Share of companies with insider purchases among the US listed companies whose "
-                             f"officers or directors traded on the open market in the 3 months to "
-                             f"{view.data_month:%B %Y}. 5-year average: {hist.mean():.0%}.")
+                        help=f"Over the 3 months to {view.data_month:%B %Y}: each month, the US listed companies "
+                             "whose officers or directors bought their own shares on the open market, divided by "
+                             "those that bought or sold, with the monthly counts added up (a company active in "
+                             f"several months counts each time). 5-year average: {hist.mean():.0%}.")
             c[1].metric("Signal", mood.capitalize(), f"{view.z:+.1f} standard deviations", delta_color="off",
                         help="Breadth compared with its own last 5 years (z-score, capped at ±2). Insider buying has "
                              "drifted down since 2006 as automatic sale plans spread, so it is compared with its "
@@ -948,14 +954,16 @@ with tabs[2], guarded("Insider Signal"):
             go.Scatter(x=avg5.index, y=avg5 * 100, name="Its 5-year average", line=dict(color=NAVY, width=1, dash="dot")),
             go.Scatter(x=spy_growth.index, y=spy_growth, name="SPY, growth of 1 USD (right axis)", yaxis="y2",
                        line=dict(color=ACCENT, width=1.5))])
-        f.update_layout(title="Insiders buy when markets are low", yaxis_title="% of companies with insider purchases",
+        f.update_layout(title="Insiders buy when markets are low", yaxis_title="% buying (company-months)",
                         yaxis2=dict(overlaying="y", side="right", type="log", showgrid=False, title="SPY (log)",
                                     tickvals=[1, 2, 4, 8], ticktext=["1", "2", "4", "8"]))
         st.plotly_chart(fig_layout(f, 420), width="stretch")
-        st.caption("Breadth = among the US listed companies whose officers or directors bought or sold their own "
-                   "shares on the open market over the last 3 months, the share with purchases (counting companies, "
-                   "not dollars, so a few huge sales do not dominate). It peaked at the market lows of 2008-2009, "
-                   "autumn 2011 and spring 2020.")
+        st.caption("Breadth: each month, count the US listed companies whose officers or directors bought their own "
+                   "shares on the open market, and those whose insiders sold. Breadth = purchases / (purchases + "
+                   "sales), each count added up over the last 3 months, so the unit is the company-month: a company "
+                   "active in several months, or on both sides, counts each time. Counting companies, not dollars, "
+                   "stops a few huge sales from dominating. It peaked at the market lows of 2008-2009, autumn 2011 and "
+                   "spring 2020.")
 
         st.markdown("#### Did insider buying predict the market?")
         bench_ex = (bench["SPY"] - rf.reindex(bench.index)).dropna()
@@ -1057,11 +1065,15 @@ with tabs[3], guarded("Backtest"):
             st.markdown(
                 f"This is a simulation of the past, {start:%B %Y} – {end:%B %Y} ({len(series) / 12:.1f} years): every "
                 f"{btm.FREQ_MONTHS[freq]} months the portfolio is rebuilt using only the {WINDOW} months of data "
-                "available at that date, and trading costs are deducted. "
+                "that end one month before the trade (data to March, trade at the end-of-April close), and "
+                "trading costs are deducted. "
                 "The stock list is today's largest US companies, i.e. the ones that succeeded, so any strategy "
                 "picking from it looks better than it really could have been. "
                 f"The **{EW_LABEL}** portfolio buys the same companies naively, in equal amounts: it shares that "
-                "bias, so the gap between it and our strategy measures what the optimisation adds. "
+                "bias, so the comparison is fair on that point. It is not our strategy without optimisation, "
+                "though: it ignores the volatility budget and the bond limits (its bonds are longer and riskier "
+                "than several profiles allow), so the gap mixes the method with differences in allocation and "
+                "constraints. "
                 "SPY and the profile benchmark are real index funds and are not affected; past results do not "
                 "guarantee future returns.")
         for ev in bt.events:

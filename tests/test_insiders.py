@@ -127,10 +127,15 @@ def test_no_view_without_data_and_errors(base, signal):
         ins.with_insider_view(plain, signal.index[-1], signal, 0.5)
 
 
-def test_backtest_views_use_only_past_filings(base, market, signal):
-    d = pd.Timestamp("2016-03-31")
-    full = btm.with_insider_view({d: base}, signal, 0.5)[d]
-    past = btm.with_insider_view({d: base}, ins.market_signal(market.loc[:d]), 0.5)[d]
+def test_backtest_views_use_only_past_filings(market, signal):
+    """A trade at the close of April 2016 uses filings up to March 2016 only (one month of lag)."""
+    d = pd.Timestamp("2016-04-30")
+    returns = data.load_returns()
+    e = btm.estimates_by_date(returns, data.load_rf(), est.shrinkage_groups(data.load_universe()), [d],
+                              benchmarks=data.load_benchmark_returns())
+    assert e[d].end == pd.Timestamp("2016-03-31")
+    full = btm.with_insider_view(e, signal, 0.5)[d]
+    past = btm.with_insider_view(e, ins.market_signal(market.loc[:"2016-03-31"]), 0.5)[d]
     assert np.allclose(full.mu, past.mu)
 
 
