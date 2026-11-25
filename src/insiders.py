@@ -28,7 +28,7 @@ about 20% over the next year, against about 12% after the other months (the lowe
 not in order); the 12-month predictive regression has a Newey-West t-stat of about 2.2 (1.4 from
 2012). The effect is modest and noisy, and insiders tend to buy early (spring 2008). Backtest
 2012-2026 at c = 50% vs no view: Sharpe +0.01 to +0.03 in every profile, smaller drawdowns,
-realised volatility at the promised budget.
+realised volatility close to the estimated risk budget.
 
 Stock-level purchases are NOT used as views: in our 150 large companies, stocks bought by their
 insiders did no better than the same month's universe or sector average over the next 3-12 months

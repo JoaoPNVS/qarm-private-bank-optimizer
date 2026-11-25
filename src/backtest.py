@@ -22,9 +22,9 @@ Equal-weight benchmark (`run_equal_weight`): same universe, same eligibility (he
 survivorship bias), same dates and costs, equal weights on stocks and bond funds split by the
 profile's bond floor.
 
-Ex-ante versus realised risk: each rebalancing records the volatility promised by the
-optimiser; the realised volatility is the annualised volatility of the strategy over the next 12
-months (NaN when fewer than 12 months remain).
+Ex-ante versus realised risk: each rebalancing records the volatility estimated by the
+optimiser; this is not a guarantee. The realised volatility is the annualised volatility of the
+strategy over the next 12 months (NaN when fewer than 12 months remain).
 """
 from __future__ import annotations
 

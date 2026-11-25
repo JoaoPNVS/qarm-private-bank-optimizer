@@ -10,8 +10,9 @@ TAIL = 0.05  # value at risk / expected shortfall level (worst 5% of simulated y
 
 
 def drawdowns(returns: pd.Series) -> pd.Series:
+    """Drawdowns from the highest wealth reached, including the initial capital."""
     wealth = (1 + returns).cumprod()
-    return wealth / wealth.cummax() - 1
+    return wealth / wealth.cummax().clip(lower=1.0) - 1
 
 
 def performance_metrics(returns: pd.Series, rf: pd.Series) -> dict:
