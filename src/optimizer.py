@@ -5,8 +5,14 @@ Problem (long-only, fully invested, annualised excess returns):
     s.t. sqrt(w'Sigma w) <= sigma_max (volatility cap of the client's profile, mandatory)
          and the other active client constraints.
 The transaction-cost term only applies when current holdings w_prev are given (backtest).
-Shadow prices are reported per +1 percentage point of relaxation of the constraint bound, in
-basis points of expected return per year.
+Shadow prices: the gain in expected return (bps per year) if the bound of a binding constraint
+were relaxed by one unit, from the solver's dual values (envelope theorem, first order). The unit is
+the bound's own: +1 percentage point for a limit expressed as a share of the portfolio, of the bond
+sleeve (investment grade) or of the equities (emerging markets), and +1 year for the duration limit.
+A ratio bound moves the constraint by (its share) x (change of the bound), so its dual is scaled by
+the bond share or the equity share. A bound at its boundary (a cap of 0%, an exclusion, a 100%
+investment-grade floor) coincides with the no-short-sale condition: its dual is not unique and no
+gain is reported (NaN). Tested against finite-difference re-solves (tests/test_optimizer.py).
 
 Nothing here raises on an infeasible or failed solve: results carry a status and, when
 infeasible, a diagnosis naming the conflicting constraints.
@@ -63,6 +69,11 @@ class Part(NamedTuple):
     label: str
     constraint: cp.Constraint
     elements: list[str] | None = None  # per-element labels for vector constraints
+    unit: str = "+1pp"                 # unit of relaxation of the bound for the shadow price
+    # change of expected return (as a fraction) per unit of relaxation and per unit of dual, given the
+    # optimal weights; default: an absolute bound in percent of the portfolio (+1pp = 0.01)
+    scale: Callable[[np.ndarray], float] | None = None
+    degenerate: bool = False           # bound at its boundary: dual not unique, no shadow price
 
 
 Builder = Callable[[cp.Variable, ProblemData, dict], list[Part]]
@@ -149,7 +160,10 @@ def max_bond_duration(limit: float = 6.0) -> Constraint:
     sum(w_b * D_b) <= limit * sum(w_b) (holds trivially without bonds)."""
     def build(w, d, p):
         dur = d.universe["duration"].fillna(0.0).loc[d.tickers].values
-        return [Part(f"Bond duration <= {p['limit']:.1f}y", (_bond_mask(d) * dur) @ w <= p["limit"] * (_bond_mask(d) @ w))]
+        m = _bond_mask(d)
+        # d/dlimit of the constraint = bond share: +1 year moves it by the bond share
+        return [Part(f"Bond duration <= {p['limit']:.1f}y", (m * dur) @ w <= p["limit"] * (m @ w),
+                     unit="+1 year", scale=lambda x, m=m: float(m @ x))]
 
     return Constraint(
         "max_bond_duration", "Maximum bond duration", {"limit": limit}, build,
@@ -160,7 +174,10 @@ def min_investment_grade(min_share: float = 0.80) -> Constraint:
     """Investment-grade funds at least `min_share` of the bond sleeve (linear form)."""
     def build(w, d, p):
         ig = _bond_mask(d, d.universe["credit_quality"] == "IG")
-        return [Part(f"IG >= {p['min_share']:.0%} of bonds", ig @ w >= p["min_share"] * (_bond_mask(d) @ w))]
+        m = _bond_mask(d)
+        return [Part(f"IG >= {p['min_share']:.0%} of bonds", ig @ w >= p["min_share"] * (m @ w),
+                     unit="-1pp of bonds", scale=lambda x, m=m: 0.01 * float(m @ x),
+                     degenerate=p["min_share"] >= 1)]
 
     return Constraint(
         "min_investment_grade", "Minimum investment grade", {"min_share": min_share}, build,
@@ -170,7 +187,8 @@ def min_investment_grade(min_share: float = 0.80) -> Constraint:
 def max_high_yield(limit: float = 0.10) -> Constraint:
     """High-yield funds (HYG, and EMB counted as high yield) at most `limit` of the whole portfolio."""
     def build(w, d, p):
-        return [Part(f"High yield <= {p['limit']:.0%}", _bond_mask(d, d.universe["credit_quality"] == "HY") @ w <= p["limit"])]
+        return [Part(f"High yield <= {p['limit']:.0%}", _bond_mask(d, d.universe["credit_quality"] == "HY") @ w <= p["limit"],
+                     degenerate=p["limit"] <= 0)]
 
     return Constraint(
         "max_high_yield", "Maximum high yield", {"limit": limit}, build,
@@ -182,7 +200,8 @@ def max_sector_weight(limit: float = 0.40) -> Constraint:
     Bond ETFs, gold and cash are not equities and are not subject to this cap."""
     def build(w, d, p):
         eq = d.universe["asset_class"] == "Equity"
-        return [Part(f"{s} <= {p['limit']:.0%}", d.mask(eq & (d.universe["sector"] == s)) @ w <= p["limit"])
+        return [Part(f"{s} <= {p['limit']:.0%}", d.mask(eq & (d.universe["sector"] == s)) @ w <= p["limit"],
+                     degenerate=p["limit"] <= 0)
                 for s in sorted(d.universe.loc[eq, "sector"].unique())]
 
     return Constraint(
@@ -196,8 +215,11 @@ def em_equity_cap(ratio: float = 1 / 3) -> Constraint:
     EM <= ratio * equities (no division, so it stays convex and holds with zero equities)."""
     def build(w, d, p):
         eq = d.universe["asset_class"] == "Equity"
+        m = d.mask(eq)
         return [Part(f"EM <= {p['ratio']:.0%} of equities",
-                     d.mask(eq & d.universe["is_EM"]) @ w <= p["ratio"] * (d.mask(eq) @ w))]
+                     d.mask(eq & d.universe["is_EM"]) @ w <= p["ratio"] * (m @ w),
+                     unit="+1pp of equities", scale=lambda x, m=m: 0.01 * float(m @ x),
+                     degenerate=p["ratio"] <= 0)]
 
     return Constraint(
         "em_equity_cap", "Emerging-markets limit", {"ratio": ratio}, build,
@@ -208,7 +230,7 @@ def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = Non
     def build(w, d, p):
         out = d.universe["sector"].isin(p["sectors"]) | d.universe.index.isin(p["tickers"])
         idx = [i for i, t in enumerate(d.tickers) if out[t]]
-        return [Part("Excluded", w[idx] == 0, [d.tickers[i] for i in idx])] if idx else []
+        return [Part("Excluded", w[idx] == 0, [d.tickers[i] for i in idx], degenerate=True)] if idx else []
 
     def describe(p):
         items = [f"the {s} sector" for s in p["sectors"]] + p["tickers"]
@@ -234,7 +256,7 @@ def min_bonds(min_share: float = 0.20) -> Constraint:
 def max_cash(limit: float = 0.10) -> Constraint:
     def build(w, d, p):
         m = d.mask(d.universe["asset_class"] == "Cash")
-        return [Part(f"Cash <= {p['limit']:.0%}", m @ w <= p["limit"])]
+        return [Part(f"Cash <= {p['limit']:.0%}", m @ w <= p["limit"], degenerate=p["limit"] <= 0)]
 
     return Constraint(
         "max_cash", "Maximum cash", {"limit": limit}, build,
@@ -306,17 +328,24 @@ def portfolio_stats(weights: pd.Series, data: ProblemData) -> dict:
             "sharpe": ret / vol if vol > TOL else np.nan, "turnover": turnover}
 
 
-def _dual_table(pairs: list[tuple[Constraint, Part]]) -> pd.DataFrame:
+DUAL_COLUMNS = ["key", "constraint", "label", "shadow_price", "unit", "bps_per_unit", "active"]
+
+
+def _dual_table(pairs: list[tuple[Constraint, Part]], x: np.ndarray) -> pd.DataFrame:
+    """One row per (element of a) constraint: raw |dual| (shadow_price), the unit of relaxation of the
+    bound and the first-order gain in expected return per unit, in bps per year (NaN when degenerate)."""
     rows = []
     for c, part in pairs:
         dual = np.atleast_1d(np.asarray(part.constraint.dual_value, dtype=float))
         labels = part.elements or [None] * dual.size
+        per_unit = part.scale(x) if part.scale else 0.01
         for value, element in zip(np.abs(dual), labels):
             rows.append({"key": c.key, "constraint": c.name,
                          "label": f"{part.label} [{element}]" if element else part.label,
-                         "shadow_price": value, "bps_per_pp": value * 100,
+                         "shadow_price": value, "unit": part.unit,
+                         "bps_per_unit": np.nan if part.degenerate else value * per_unit * 1e4,
                          "active": value > ACTIVE_DUAL_TOL})
-    return pd.DataFrame(rows, columns=["key", "constraint", "label", "shadow_price", "bps_per_pp", "active"])
+    return pd.DataFrame(rows, columns=DUAL_COLUMNS)
 
 
 def is_feasible(data: ProblemData, constraints: list[Constraint]) -> bool:
@@ -358,12 +387,12 @@ def solve(data: ProblemData, constraints: list[Constraint], diagnose: bool = Tru
     if status in OK_STATUSES:
         weights = pd.Series(np.clip(w.value, 0, None), index=data.tickers, name="weight")
         weights /= weights.sum()
-        duals = _dual_table(pairs)
+        duals = _dual_table(pairs, weights.values)
         bond_share = float(weights[data.universe["asset_class"] == "Bond"].sum())
         if bond_share < EMPTY_SLEEVE:
             # without bonds the ratio constraints read 0 <= 0: the solver may return a non-zero
             # multiplier at that degenerate point, but no bond rule limits a portfolio with no bonds
-            duals.loc[duals["key"].isin(BOND_SLEEVE_KEYS), ["shadow_price", "bps_per_pp", "active"]] = [0.0, 0.0, False]
+            duals.loc[duals["key"].isin(BOND_SLEEVE_KEYS), ["shadow_price", "bps_per_unit", "active"]] = [0.0, 0.0, False]
         return OptimizationResult(status, weights, **portfolio_stats(weights, data),
                                   duals=duals, message="Optimal portfolio found.")
     if status in INFEASIBLE_STATUSES:

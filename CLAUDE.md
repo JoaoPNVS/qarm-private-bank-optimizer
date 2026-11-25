@@ -59,6 +59,11 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - Exclusions of sectors or individual companies.
 - Infeasibility diagnosis: the optimiser never crashes; a deletion filter names the minimal set
   of conflicting constraints and the ones whose removal alone restores feasibility.
+- Shadow prices (Holdings, "Binding constraints"): gain in expected return, bps per year, per unit
+  of relaxation in the bound's own unit: +1pp of the portfolio; +1pp of the bonds for investment
+  grade and +1pp of the equities for EM (dual x bond or equity share); +1 year for duration (dual x
+  bond share). n/a for an exclusion or a 0% / 100% bound (dual not unique). Tested against
+  finite-difference re-solves.
 
 ## Data (yfinance; Wikipedia for the constituent snapshot; SEC for insider trades)
 - **Universe** (`data/universe.csv`, one file, each asset tagged with asset_class, sector,
@@ -134,33 +139,36 @@ Grading criteria (from the professor) — every feature should serve one of thes
   market = 60% SPY / 40% AGG and delta = 2.5. General posterior for any views
   (`black_litterman_posterior` in `src/estimators.py`): mu = pi + tau Sigma P'(P tau Sigma P' + Omega)^-1
   (Q - P pi), Omega = diag(P tau Sigma P') (1 - c) / c, tau = 0.05 (He & Litterman).
-- **House view 1 (DEFAULT): insider trading** (`src/insiders.py`). Breadth of insider buying = among
-  the US listed companies whose officers/directors traded on the open market over the last 3 months,
-  the share with purchases (counting companies, not dollars). z-score against its own last 60 months
+- **House view 1 (DEFAULT): insider trading** (`src/insiders.py`). Breadth of insider buying = buying
+  company-months / (buying + selling company-months) over the last 3 months: each month, the number of
+  US listed companies whose officers/directors bought on the open market and the number whose insiders
+  sold, each added up over 3 months (a company active in several months, or on both sides, counts each
+  time; counting companies, not dollars). z-score against its own last 60 months
   (it drifts down since 2006 as 10b5-1 sale plans spread), capped at +-2. ONE relative view:
   E[SPY] - E[AGG] = equilibrium spread + 2% x z. Confidence c: slider 0-90%, default 50% (for a
   single view, c is exactly its weight against the equilibrium). Point in time: filings dated up to
-  the rebalancing date; no view if the data is older than 6 months. Evidence: breadth peaked at the
+  the end of the estimation window (in the backtest the month before the trade); no view if the data is older than 6 months. Evidence: breadth peaked at the
   market lows (Dec 2008 - Mar 2009, Oct 2011, May 2020); after the top fifth of months by breadth,
   SPY beat the T-bill by ~20% over the next year vs ~12% after the other months; 12-month
   predictive regression Newey-West t ~2.2 (modest, noisy; insiders also bought early in 2008).
   **Stock-level purchases are NOT used as views:** in our 150 large companies, stocks bought by
   their insiders did no better than the same month's universe or sector average over 3-12 months
   (`purchase_event_study`, t-stats around 0); shown in the app as information only. Backtest
-  2012-2026 at c = 50% vs no view (c = 0): Sharpe +0.01 to +0.03 in every profile, smaller
-  drawdowns, realised volatility at the budget (Balanced 1.09 vs 1.07, 10.1% realised, max DD
-  -19.2% vs -20.1%). The breadth uses ALL listed companies, so it is free of our universe's
+  2012-05 to 2026-09 (one-month lag, see Backtest) at c = 50% vs no view (c = 0): Sharpe +0.01 to
+  +0.03 in every profile, drawdowns about the same, realised volatility at the budget (Balanced
+  1.05 vs 1.04, 10.3% realised, max DD -20.3% vs -20.3%). The breadth uses ALL listed companies, so it is free of our universe's
   survivorship bias.
 - **House view 2: past performance** (`black_litterman_mu`, `with_view_confidence`). Views = every
   asset's 60-month historical mean (P = identity). c = "confidence in past performance", a
   slider 0-25%, default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
   typical asset moves about a third of the way to its historical mean, SPY most of the way.
-  Backtest 2012-2026, Balanced: Sharpe 1.15 (old method 0.97, equal weight 1.16), realised
-  volatility 11.1% for a 10% budget (old 12.7%); c = 0 keeps the budget (10.0%). Omega
+  Backtest 2012-05 to 2026-09, Balanced: Sharpe 1.13 (old method 0.88, equal weight 1.14), realised
+  volatility 11.2% for a 10% budget (old 12.6%); c = 0: 10.6% (10.1% on average over the 12 months
+  after each rebalancing). Omega
   proportional to the full tau Sigma (exact linear blend) was tested and rejected (worse). The
   portfolio and the benchmarks (SPY, AGG) get their expected returns from the same posterior.
-  Its higher backtest Sharpe comes with more risk than promised in every profile (e.g. 7.0% for a
-  6% budget), deeper drawdowns and twice the turnover, and partly with hindsight: it favours past
+  Its higher backtest Sharpe comes with more risk than promised in every profile (e.g. 7.1% for a
+  6% budget), deeper drawdowns and about twice the turnover, and partly with hindsight: it favours past
   winners in a list of today's winners. Hence the insider view is the default.
 - Previous method, kept for comparison and tests: historical mean over the 60-month window, shrunk toward the grand mean of
   the asset's shrinkage group: mu_i = (1 - a) m_i + a m_group, **a = 0.8**. Groups = asset
@@ -183,8 +191,12 @@ Grading criteria (from the professor) — every feature should serve one of thes
   tiered by volume because ETF liquidity comes from the underlying (VGK: $0.26bn a day, 1-2 bp
   spread); cash 0. The optimiser penalises sum_i c_i |w_i - w_prev_i| and the backtest charges
   the same costs. Run `build_universe.py` before `download_data.py` (the build rewrites the CSV).
-- **Backtest** (`src/backtest.py`): common start at the 2012-01-31 rebalancing (first date with
-  five eligible bond funds: 70% bonds at 15% per fund), rolling 60-month window, rebalancing
+- **Backtest** (`src/backtest.py`): **timing = one-month implementation lag**: the decision traded at
+  the close of month t uses data up to t-1 only (estimation window, eligibility, insider filings;
+  `information_date`), so nothing assumes the month-end close is known before trading at it
+  (deciding and trading at the same close added +0.01 to +0.03 to every profile's Sharpe). Common
+  start at the 2012-04-30 rebalancing (first quarter-end whose data, to 2012-03, has five eligible
+  bond funds: 70% bonds at 15% per fund), returns from 2012-05, rolling 60-month window, rebalancing
   every 3 months from the start (or
   semi-annual / annual), asset-specific transaction costs (see below). Compared with SPY and the
   profile benchmark: annualised return, volatility, Sharpe, max drawdown. It must compare the
@@ -193,8 +205,11 @@ Grading criteria (from the professor) — every feature should serve one of thes
   rebalancing equal weights on the eligible stocks (same 60-month rule, hence the same
   survivors) for 1 - floor, and equal weights on the eligible bond funds (cash equivalents
   excluded) for the profile's bond floor; same dates, drift and per-asset costs as the strategy.
-  It has the same survivorship bias, so the gap to the strategy measures what the optimisation
-  adds. Shown in every backtest table and chart, with a plain-language "How to read these
+  It has the same survivorship bias, so the comparison is free of it; but the gap is NOT the effect
+  of the optimisation alone: the equal-weight portfolio also ignores the volatility budget and the
+  bond-sleeve limits (its bonds: ~6.4y duration, ~15% high yield, ~85% IG with today's fund data,
+  outside the Conservative / Balanced limits). Backtest Sharpe: strategy below equal weight in
+  every profile (Balanced 1.05 vs 1.14), above the profile benchmark (0.84). Shown in every backtest table and chart, with a plain-language "How to read these
   results" box for the client.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
   fixed seed) of the client's wealth over 5-20 years, starting from the client wealth. History =
