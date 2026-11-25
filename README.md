@@ -15,7 +15,7 @@ Form 4 filings since 2006) tilts the portfolio between equities and bonds.
 | Client Profile | client settings (wealth, profile override, house view and its confidence) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
 | Portfolio | every client constraint with a toggle and a slider (in the "Adjust constraints" panel), preset to the profile; conflicting constraints are named when the portfolio is impossible. Sub-tabs: *Overview* (expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints and the return they cost, minimum-variance and maximum-Sharpe portfolios, capital market line), *Allocation* (by asset class and sector, where the risk comes from: risk contributions and diversification measures), *Bonds* (segments, duration, rating), *Holdings* (weights in USD, trading cost per asset, binding constraints) |
 | Insider Signal | today's breadth of insider buying and the view it implies, its history against SPY, the evidence and its limits, the Black-Litterman view, recent insider purchases in our companies and why we do not bet on single stocks |
-| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; promised vs realised volatility; allocation over time; side-by-side comparison of the house views |
+| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; estimated vs realised volatility; allocation over time; side-by-side comparison of the house views |
 | Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark: range of outcomes, loss beyond the client's limit, worst fall, one-year VaR and expected shortfall |
 
 The "About Us" button (top right) presents the project and the team.
@@ -42,9 +42,11 @@ The "About Us" button (top right) presents the project and the team.
     about 12% otherwise (modest and noisy evidence, shown in the app with its limits). Insider
     purchases of single large companies showed no edge, so they are displayed but not used.
     Backtest 2012–2026 against no view: slightly higher Sharpe in every profile (Balanced 1.09 vs
-    1.07), smaller drawdowns, realised volatility at the budget (10.1% for 10%).
+    1.07), smaller drawdowns, and 10.1% realised volatility over the whole backtest for a 10%
+    estimated volatility budget.
   - **Past performance.** Views = each asset's 60-month average return (default confidence 10%).
-    Higher backtest Sharpe (Balanced 1.15), but more risk than promised (11.1% for a 10% budget),
+    Higher backtest Sharpe (Balanced 1.15), but higher realised volatility over the whole backtest
+    (11.1% for a 10% estimated volatility budget),
     deeper drawdowns, twice the turnover, and partly hindsight: it favours past winners in a list
     of today's winners.
 - **Risk:** Ledoit-Wolf covariance on standardised returns over a rolling 60-month window. An
@@ -101,9 +103,13 @@ network.
   backtest start (2012). On the data available in January 2012 alone they would have been the same
   (Conservative 6%, Balanced 10%) or higher (Growth 13%, Dynamic 16%, because 2003–2011 includes
   2008), so this choice does not flatter the backtest.
-- The volatility promised by the optimiser is exceeded out of sample on average (estimation
-  error): 11.1% realised for a 10% budget at the default confidence, 10.0% with the pure
-  equilibrium (0%).
+- The volatility budget applies to estimated volatility at each rebalancing, not to a guaranteed
+  future maximum. Realised volatility can exceed it. For the Balanced profile, annualised
+  realised volatility over the entire backtest is 10.1% with the default insider view at 50%
+  confidence and 11.1% with the past-performance view at its 10% default confidence, for a 10%
+  budget. The app also reports the average realised volatility over the following 12 months at
+  each eligible rebalancing; those windows may overlap and are a different measure from the
+  volatility of the full backtest.
 - The optimised strategy does not clearly beat the equal-weight portfolio of the same universe
   (Balanced Sharpe 1.15 vs 1.16); a well-known result with short estimation windows (DeMiguel,
   Garlappi and Uppal, 2009).

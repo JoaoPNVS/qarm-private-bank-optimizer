@@ -442,7 +442,7 @@ def _about_dialog():
     st.markdown(
         "We play the role of an **international private bank** advising clients whose reference currency is "
         "the US dollar. The app turns a short suitability questionnaire into a risk profile, then builds the "
-        "portfolio with the highest expected return that stays within the client's volatility budget and "
+        "portfolio with the highest expected return whose estimated volatility is within the client's budget and "
         "investment constraints. Every recommendation is backtested and its future range of outcomes simulated, "
         "so the client can see both the potential and the risks. It was built for the course *Quantitative "
         "Asset and Risk Management II* at HEC Lausanne.")
@@ -472,7 +472,7 @@ with st.container(key="top-controls"):
         _about_dialog()
 
 st.title("Private Client Portfolio Optimizer")
-st.caption("Highest expected return within the client's volatility budget. All figures in USD.")
+st.caption("Highest expected return with estimated volatility within the client's budget. All figures in USD.")
 
 with st.container(key="main-nav"):
     tabs = st.tabs(["Client Profile", "Portfolio", "Insider Signal", "Backtest", "Simulation"])
@@ -511,8 +511,8 @@ with tabs[0], guarded("Client Profile"):
                     int(est.DEFAULT_VIEW_CONFIDENCE * 100), 5, format="%d%%", key="views",
                     help=f"Each asset's average return over the last {WINDOW} months is added as a view, with this "
                          "confidence. Because assets move together, the views reinforce each other, so even 10% "
-                         "tilts the portfolio noticeably. 0% = pure equilibrium: most diversified, closest to the "
-                         "promised risk. Higher = more weight on recent trends, with more risk and trading.") / 100
+                         "tilts the portfolio noticeably. 0% = pure equilibrium. Higher = more weight on recent "
+                         "trends, potentially with more risk and trading.") / 100
         insider_note = (f" Insider trades: SEC Form 4 filings up to {pd.Timestamp(insider_meta['last_filing']):%B %Y}."
                         if insider_meta else f" Insider view unavailable: {insider_error}")
         st.caption(f"Data: monthly total returns in USD up to {returns.index[-1]:%B %Y} (yfinance). "
@@ -551,9 +551,10 @@ with tabs[0], guarded("Client Profile"):
             st.markdown("**Why this profile**")
             for r in a.reasons:
                 st.markdown(f"- {r}")
-            st.markdown(f"**What it means:** expected volatility at most {sp.max_volatility:.0%}, "
+            st.markdown(f"**What it means:** estimated volatility at most {sp.max_volatility:.0%}, "
                         f"at least {sp.min_bonds:.0%} in bonds, compared with a "
                         f"{sp.benchmark_equity:.0%} SPY / {1 - sp.benchmark_equity:.0%} AGG benchmark.")
+            st.caption("The volatility budget applies to the estimate before investing; realised volatility may be higher.")
 
     with st.expander("All profiles & scoring methodology", expanded=False):
         profiles_table = pd.DataFrame({p: {"Max volatility": f"{s.max_volatility:.0%}",
@@ -593,7 +594,7 @@ with tabs[1], guarded("Portfolio"):
         st.markdown("##### Volatility budget and asset mix")
         col_a, col_b = st.columns(2, gap="large")
         card("max_volatility", col_a, lambda off: {"limit": pct_slider(
-            "Max expected volatility", spec_p.max_volatility, 2, 25, 0.5, k("vol"), off)}, mandatory=True)
+            "Max estimated volatility", spec_p.max_volatility, 2, 25, 0.5, k("vol"), off)}, mandatory=True)
         card("min_bonds", col_a, lambda off: {"min_share": pct_slider(
             "Min share in bond funds", spec_p.min_bonds, 0, 100, 5, k("bonds"), off)})
         card("max_cash", col_b, lambda off: {"limit": pct_slider(
@@ -667,15 +668,15 @@ with tabs[1], guarded("Portfolio"):
             c = st.columns(4)
             c[0].metric("Expected return above T-bill", pct(res.expected_return, 2),
                         f"{(res.expected_return - bench_stats['expected_return']) * 1e4:+.0f} bps vs benchmark")
-            c[1].metric("Expected volatility", pct(res.volatility, 2),
+            c[1].metric("Estimated volatility", pct(res.volatility, 2),
                         f"{(res.volatility - bench_stats['volatility']) * 100:+.2f} pp vs benchmark", delta_color="inverse")
             c[2].metric("Sharpe ratio", f"{res.sharpe:.2f}", f"{res.sharpe - bench_stats['sharpe']:+.2f} vs benchmark")
             c[3].metric("Tracking error vs benchmark", pct(te, 2))
             comp = pd.DataFrame({"Portfolio": [res.expected_return, res.volatility, res.sharpe],
                                  bench_label(profile): [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
                                  "SPY": [spy_stats["expected_return"], spy_stats["volatility"], spy_stats["sharpe"]]},
-                                index=["Expected excess return", "Expected volatility", "Sharpe ratio"])
-            st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Expected volatility"], :])
+                                index=["Expected excess return", "Estimated volatility", "Sharpe ratio"])
+            st.dataframe(comp.style.format("{:.2%}", subset=pd.IndexSlice[["Expected excess return", "Estimated volatility"], :])
                          .format("{:.2f}", subset=pd.IndexSlice[["Sharpe ratio"], :]), width="stretch")
             view_text = ("the insider view (equities vs bonds, from the breadth of insider buying across US "
                          "companies; see the Insider Signal tab)" if view_source == INSIDER
@@ -723,14 +724,14 @@ with tabs[1], guarded("Portfolio"):
                                mode="markers", marker=dict(color=NAVY, size=18, symbol="star", line=dict(color="white", width=1)))])
                 f.add_vline(x=cap * 100, line=dict(color=NAVY, width=1, dash="dot"),
                             annotation_text=f"Volatility budget {cap:.0%}", annotation_position="top left")
-                f.update_layout(title="Best expected return for each level of risk", xaxis_title="Expected volatility (% p.a.)",
+                f.update_layout(title="Best expected return for each level of risk", xaxis_title="Estimated volatility (% p.a.)",
                                 yaxis_title="Expected return above T-bill (% p.a.)")
                 f1.plotly_chart(fig_layout(f, 430), width="stretch")
                 mix = front.set_index("volatility")[fr.CLASS_ORDER].rename(columns=CLASS_LABELS) * 100
                 g = go.Figure([go.Scatter(x=mix.index * 100, y=mix[c], name=c, stackgroup="one", mode="none", fillcolor=clr)
                                for c, clr in zip(mix.columns, CLASS_COLORS)])
                 g.add_vline(x=cap * 100, line=dict(color="white", width=2, dash="dot"))
-                g.update_layout(title="Allocation along the frontier", xaxis_title="Expected volatility (% p.a.)",
+                g.update_layout(title="Allocation along the frontier", xaxis_title="Estimated volatility (% p.a.)",
                                 yaxis_title="% of portfolio", yaxis_range=[0, 100])
                 f2.plotly_chart(fig_layout(g, 430), width="stretch")
                 st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
@@ -896,7 +897,7 @@ with tabs[2], guarded("Insider Signal"):
             "are **buying** on the open market rather than selling. Insiders sell for many reasons (diversification, "
             "taxes, automatic sale plans); they buy for one: they expect the price to rise. When buying spreads "
             "across companies, we expect equities to beat bonds by more than usual, and tilt the portfolio "
-            "toward equities, within the client's volatility budget.")
+            "toward equities, within the client's estimated volatility budget.")
         conf_ins = confidence if view_source == INSIDER else ins.DEFAULT_CONFIDENCE
         e_now = get_estimates()
         e_ins, view = ins.with_insider_view(e_now, e_now.end, signal, conf_ins)
@@ -977,7 +978,7 @@ with tabs[2], guarded("Insider Signal"):
                 "**Honest limits.** The effect is modest and noisy: the four other groups are not in order, and a "
                 "12-month regression gives a Newey-West t-statistic of about 2. Insiders also tend to buy early: "
                 "in spring 2008 they bought before the worst of the crisis. This is why the view only tilts the "
-                "portfolio, with a confidence you choose, and never leaves the volatility budget.")
+                "portfolio, with a confidence you choose, subject to the estimated volatility budget.")
 
         with st.expander("How the view enters the portfolio (Black-Litterman)"):
             st.markdown(
@@ -1046,7 +1047,7 @@ with tabs[3], guarded("Backtest"):
         h = st.columns(4)
         h[0].metric("Annual return", pct(s_["annual_return"]),
                     f"{(s_['annual_return'] - b_['annual_return']) * 100:+.1f} pp vs benchmark")
-        h[1].metric("Volatility", pct(s_["volatility"]),
+        h[1].metric("Realised volatility", pct(s_["volatility"]),
                     f"{(s_['volatility'] - b_['volatility']) * 100:+.1f} pp vs benchmark", delta_color="inverse")
         h[2].metric("Sharpe ratio", f"{s_['sharpe']:.2f}", f"{s_['sharpe'] - b_['sharpe']:+.2f} vs benchmark")
         h[3].metric("Max drawdown", pct(s_["max_drawdown"]),
@@ -1077,15 +1078,18 @@ with tabs[3], guarded("Backtest"):
 
         reb = bt.rebalances[bt.rebalances["status"] == "ok"]
         left, right = st.columns(2, gap="large")
-        f = go.Figure([go.Scatter(x=reb.index, y=reb["ex_ante_vol"] * 100, name="Ex-ante (promised)",
+        f = go.Figure([go.Scatter(x=reb.index, y=reb["ex_ante_vol"] * 100, name="Estimated (ex ante)",
                                   line=dict(color=NAVY, width=3)),
                        go.Scatter(x=reb.index, y=reb["realised_vol"] * 100, name="Realised (next 12 months)",
                                   line=dict(color=ACCENT, width=2))])
-        f.update_layout(title="Volatility promised vs realised at each rebalancing", yaxis_title="% p.a.")
+        f.update_layout(title="Estimated vs realised volatility at each rebalancing", yaxis_title="% p.a.")
         left.plotly_chart(fig_layout(f, 380), width="stretch")
-        left.caption(f"Average ex-ante volatility {reb['ex_ante_vol'].mean():.1%}; average realised over the next "
-                     f"12 months {reb['realised_vol'].mean():.1%}; realised over the whole backtest "
-                     f"{metrics.loc['Strategy', 'volatility']:.1%}.")
+        left.caption(f"Average estimated volatility at rebalancing: {reb['ex_ante_vol'].mean():.1%}. "
+                     f"Average realised volatility over the following 12 months: {reb['realised_vol'].mean():.1%}. "
+                     f"Realised volatility over the entire backtest: {metrics.loc['Strategy', 'volatility']:.1%}. "
+                     "The 12-month windows require 12 months of returns; they may overlap and include later rebalancings. "
+                     "Their average differs from volatility over the full period. The budget applies to the "
+                     "estimate, not a guarantee: realised volatility can exceed it.")
         dd = pd.DataFrame({k: risk.drawdowns(series[k]) for k in series}) * 100
         f = go.Figure([go.Scatter(x=dd.index, y=dd[k], name=k, line=dict(color=clr, dash=dash))
                        for k, clr, _, dash in styles])
@@ -1136,13 +1140,13 @@ with tabs[3], guarded("Backtest"):
                               "ex_ante": ok_k["ex_ante_vol"].mean(), "turnover": btm.annual_turnover(bt_k)}
             views_cmp = pd.DataFrame(rows).T.rename(columns={
                 "annual_return": "Annual return", "volatility": "Volatility", "sharpe": "Sharpe ratio",
-                "max_drawdown": "Max drawdown", "ex_ante": "Promised volatility", "turnover": "Turnover p.a."})
+                "max_drawdown": "Max drawdown", "ex_ante": "Estimated volatility (ex ante)", "turnover": "Turnover p.a."})
             st.dataframe(views_cmp.style.format({"Annual return": "{:.2%}", "Volatility": "{:.2%}", "Sharpe ratio": "{:.2f}",
-                                                 "Max drawdown": "{:.1%}", "Promised volatility": "{:.2%}",
+                                                 "Max drawdown": "{:.1%}", "Estimated volatility (ex ante)": "{:.2%}",
                                                  "Turnover p.a.": "{:.0%}"}), width="stretch")
             st.caption("Same profile, constraints, dates and trading costs: only the expected returns change. The "
                        "past-performance view favours recent winners, and our stock list is made of today's winners, "
-                       "so its backtest gains are partly hindsight; it also takes more risk than promised. The insider "
+                       "so its backtest gains are partly hindsight. Realised volatility can exceed its estimate. The insider "
                        "view is measured on all US listed companies, including those that later disappeared.")
 
 with tabs[4], guarded("Simulation"):
