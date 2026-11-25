@@ -352,10 +352,10 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
 }}
 .st-key-main-nav [role="tab"] {{
   background: transparent !important; color: var(--text) !important;
-  border-radius: 999px !important; padding: 16px 56px !important;
-  font-weight: 500 !important; font-size: 1.25rem !important; line-height: 1.2 !important;
+  border-radius: 999px !important; padding: 14px 36px !important;
+  font-weight: 500 !important; font-size: 1.2rem !important; line-height: 1.2 !important;
   border: none !important; transition: background 0.15s, color 0.15s, transform 0.15s;
-  min-width: 170px !important; text-align: center !important;
+  min-width: 120px !important; text-align: center !important;
 }}
 .st-key-main-nav [role="tab"]:hover {{ background: var(--hover) !important; transform: translateY(-1px); }}
 .st-key-main-nav [role="tab"][aria-selected="true"] {{
@@ -422,7 +422,11 @@ h1 {{ margin-top: 0 !important; padding-top: 0 !important; }}
 .st-key-top-controls button:hover {{ background: var(--surface-2) !important; }}
 /* Hide the floating nav while the About Us dialog is open (it sat on top of the dialog) */
 body:has([role="dialog"]) .st-key-main-nav [role="tablist"] {{ display: none !important; }}
-/* Narrow screens (phones, small windows): all five nav buttons must fit */
+/* Medium screens (small laptops, split windows): six nav buttons in one row */
+@media (max-width: 1200px) {{
+  .st-key-main-nav [role="tab"] {{ padding: 10px 14px !important; min-width: 0 !important; font-size: 1.05rem !important; }}
+}}
+/* Narrow screens (phones, small windows): all six nav buttons must fit */
 @media (max-width: 820px) {{
   .st-key-main-nav [role="tablist"] {{ bottom: 12px !important; padding: 6px !important; gap: 2px !important;
     width: calc(100vw - 24px) !important; max-width: none !important; justify-content: space-between !important; }}
@@ -471,15 +475,102 @@ with st.container(key="top-controls"):
     if st.button("About Us", key="btn-about", use_container_width=True):
         _about_dialog()
 
-st.title("Private Client Portfolio Optimizer")
-st.caption("Highest expected return within the client's volatility budget. All figures in USD.")
+
+
+def page_header() -> None:
+    """Title of every tab except Home, whose blue ribbon carries the name."""
+    st.title("Private Client Portfolio Optimizer")
+    st.caption("Highest expected return within the client's volatility budget. All figures in USD.")
+
 
 with st.container(key="main-nav"):
-    tabs = st.tabs(["Client Profile", "Portfolio", "Insider Signal", "Backtest", "Simulation"])
+    tabs = st.tabs(["Home", "Client Profile", "Portfolio", "Insider Signal", "Backtest", "Simulation"])
+
+# --- Home ------------------------------------------------------------------------------------
+
+HOME_STEPS = [
+    ("1", "Client Profile", "Answer seven questions. They set your risk profile, your volatility budget and "
+                            "the minimum share in bonds."),
+    ("2", "Portfolio", "The portfolio with the highest expected return within your budget, the efficient "
+                       "frontier and where the risk comes from. Every constraint can be changed."),
+    ("3", "Insider Signal", "Our house view: whether company insiders are buying their own shares, and how "
+                            "that tilts the portfolio between equities and bonds."),
+    ("4", "Backtest", "How the strategy would have done since 2012, against SPY, the profile benchmark and "
+                      "an equal-weight portfolio."),
+    ("5", "Simulation", "The range of outcomes for your wealth over 5 to 20 years, and the risk along the way."),
+]
+
+HOME_CHIPS = ["Suitability profile in 7 questions", "Black-Litterman with insider trading",
+              "Backtest since 2012", "5,000 wealth scenarios"]
+
+# Home page styles: a deep-blue ribbon (fixed colours, readable on every theme) and cards that use
+# the theme's CSS variables. HTML blocks have no blank lines or indentation (Markdown would break them).
+HOME_CSS = """<style>
+.home-hero { position: relative; overflow: hidden; min-height: 58vh; display: flex; flex-direction: column;
+  justify-content: center; padding: 3.2rem 3.6rem; margin: 0.4rem 0 2.2rem; border-radius: 24px;
+  background: linear-gradient(135deg, #0f2f52 0%, #1f4e79 48%, #3a78b5 100%);
+  box-shadow: 0 18px 50px rgba(15, 47, 82, 0.32); }
+.home-hero::before, .home-hero::after { content: ""; position: absolute; border-radius: 50%; pointer-events: none; }
+.home-hero::before { width: 560px; height: 560px; right: -150px; top: -200px;
+  background: radial-gradient(circle, rgba(255,255,255,0.17), rgba(255,255,255,0) 70%); }
+.home-hero::after { width: 420px; height: 420px; left: -140px; bottom: -230px;
+  background: radial-gradient(circle, rgba(255,255,255,0.10), rgba(255,255,255,0) 70%); }
+.home-kicker { position: relative; text-transform: uppercase; letter-spacing: 0.18em; font-size: 0.85rem;
+  font-weight: 600; color: rgba(255,255,255,0.78) !important; }
+.home-welcome { position: relative; font-family: var(--font-serif); font-size: clamp(1.6rem, 3vw, 2.4rem);
+  font-weight: 400; color: rgba(255,255,255,0.88) !important; margin-top: 1.2rem; }
+.home-title { position: relative; font-family: var(--font-serif); font-size: clamp(2.8rem, 6.2vw, 5.4rem);
+  line-height: 1.05; font-weight: 500; letter-spacing: -0.02em; color: #ffffff !important; margin: 0.2rem 0 1.2rem;
+  max-width: 1100px; }
+.home-sub { position: relative; max-width: 780px; font-size: clamp(1.05rem, 1.6vw, 1.35rem); line-height: 1.55;
+  color: rgba(255,255,255,0.92) !important; }
+.home-chips { position: relative; display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.9rem; }
+.home-chips span { background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.30); color: #ffffff;
+  border-radius: 999px; padding: 0.42rem 1rem; font-size: 0.92rem; }
+.home-scroll { position: relative; margin-top: 2.6rem; font-size: 0.95rem; color: rgba(255,255,255,0.82) !important; }
+.home-scroll b { display: inline-block; margin-left: 0.3rem; animation: home-bounce 1.8s ease-in-out infinite; }
+@keyframes home-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+.home-section { font-family: var(--font-serif); font-size: 1.6rem; color: var(--text); margin: 0.4rem 0 0.9rem; }
+.home-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1.4rem; }
+.home-step { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 1.25rem 1.15rem; box-shadow: var(--shadow); }
+.home-step .num { width: 2.3rem; height: 2.3rem; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; background: var(--accent); color: #ffffff; font-weight: 600; margin-bottom: 0.85rem; }
+.home-step .name { font-weight: 600; font-size: 1.05rem; color: var(--text); margin-bottom: 0.35rem; }
+.home-step .text { font-size: 0.92rem; line-height: 1.45; color: var(--text-dim); }
+.st-key-home-stats [data-testid="stMetricValue"] { color: var(--accent) !important; font-family: var(--font-serif); }
+@media (max-width: 1000px) { .home-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-hero { padding: 2.4rem 1.8rem; min-height: 50vh; } }
+@media (max-width: 600px) { .home-steps { grid-template-columns: 1fr; } }
+</style>"""
+
+with tabs[0], guarded("Home"):
+    st.markdown(HOME_CSS, unsafe_allow_html=True)
+    chips = "".join(f"<span>{html.escape(c)}</span>" for c in HOME_CHIPS)
+    st.markdown(
+        '<div class="home-hero">'
+        '<div class="home-kicker">International private bank · US dollar clients</div>'
+        '<div class="home-welcome">Welcome to the</div>'
+        '<div class="home-title">Private Client Portfolio Optimizer</div>'
+        '<div class="home-sub">From seven questions, we build the portfolio with the highest expected return that '
+        "stays within your volatility budget, tilted by our house view: what company insiders do with their own "
+        "money.</div>"
+        f'<div class="home-chips">{chips}</div>'
+        '<div class="home-scroll">Scroll down for today\'s portfolio and the five steps<b>↓</b></div>'
+        "</div>", unsafe_allow_html=True)
+    home_live = st.container()   # "Today at a glance": filled once the portfolio is computed (see below)
+    steps = "".join(
+        f'<div class="home-step"><div class="num">{num}</div><div class="name">{html.escape(tab)}</div>'
+        f'<div class="text">{html.escape(text)}</div></div>' for num, tab, text in HOME_STEPS)
+    st.markdown(f'<div class="home-section">How to use the app</div><div class="home-steps">{steps}</div>',
+                unsafe_allow_html=True)
+    st.caption("Move between the steps with the bar at the bottom of the screen. The team is presented under "
+               "\"About Us\" (top right). Figures are estimates in USD, not a guarantee of future returns.")
 
 # --- Client Profile --------------------------------------------------------------------------
 
-with tabs[0], guarded("Client Profile"):
+with tabs[1], guarded("Client Profile"):
+    page_header()
     with st.expander("Client settings", expanded=True):
         signal, insider_trades, insider_meta, insider_error = load_insiders()
         s1, s2, s3, s4 = st.columns(4)
@@ -572,7 +663,8 @@ cons_spec: dict = {}
 stock_tickers = [t for t in universe.index if universe.at[t, "vehicle"] == "Stock"]
 sectors = sorted(universe.loc[universe["asset_class"] == "Equity", "sector"].unique())
 
-with tabs[1], guarded("Portfolio"):
+with tabs[2], guarded("Portfolio"):
+    page_header()
     # Constraints first, so "what if" changes are one click away during the pitch; the status line
     # (binding constraints, or the conflict) sits right under them, above the results.
     with st.expander(f"Adjust constraints ({profile} defaults)", expanded=False):
@@ -882,9 +974,42 @@ with tabs[1], guarded("Portfolio"):
                     "constraint": "Constraint", "label": "Bound", "bps_per_pp": "bps per +1pp"}).style.format(
                     {"bps per +1pp": "{:.1f}"}), hide_index=True, width="stretch")
 
+# --- Home: live figures (written into the Home tab now that the portfolio is known) -----------
+
+with home_live, guarded("Home"), st.container(key="home-stats"):
+    st.markdown('<div class="home-section">Today at a glance</div>', unsafe_allow_html=True)
+    cap = cons_spec["max_volatility"]["params"]["limit"]
+    c = [col.container(border=True) for col in st.columns(4, gap="medium")]
+    c[0].metric("Risk profile", profile, f"volatility budget {cap:.0%}", delta_color="off",
+                help="From the questionnaire (Client Profile tab), unless overridden in the client settings.")
+    if res.ok:
+        c[1].metric("Expected return p.a. above T-bill", pct(res.expected_return, 1),
+                    help="Recommended portfolio, ex ante. The Portfolio tab compares it with the benchmark "
+                         f"({bench_label(profile)}) and SPY.")
+        c[2].metric("Expected volatility p.a.", pct(res.volatility, 1), f"budget {cap:.0%}", delta_color="off",
+                    help="The optimiser uses the whole volatility budget when it raises the expected return.")
+    else:
+        c[1].metric("Recommended portfolio", "Not feasible", delta_color="off",
+                    help="The current constraints cannot all be met: see the Portfolio tab.")
+    month, share, z = ins.signal_at(signal, returns.index[-1]) if signal is not None else (None, None, None)
+    if z is None:
+        c[3].metric("Insider signal", "Not available", delta_color="off")
+    else:
+        mood = "Above normal" if z > 0.5 else "Below normal" if z < -0.5 else "Normal"
+        effect = ("not used (past-performance view)" if view_source != INSIDER
+                  else "leans to equities" if z > 0.5 else "leans to bonds" if z < -0.5 else "no tilt")
+        c[3].metric("Insider signal", mood, effect, delta_color="off",
+                    help=f"Insider buying breadth {share:.0%} in the 3 months to {month:%B %Y}, {z:+.1f} standard "
+                         "deviations against its last 5 years. Details in the Insider Signal tab.")
+    if res.ok:
+        mix = res.weights.groupby(universe.loc[res.weights.index, "asset_class"]).sum().reindex(CLASS_ORDER).fillna(0)
+        st.caption("Recommended mix: " + ", ".join(f"{CLASS_LABELS[k].lower()} {v:.0%}" for k, v in mix.items() if v >= 0.005)
+                   + f" (for a {usd_short(wealth)} portfolio).")
+
 # --- Insider Signal --------------------------------------------------------------------------
 
-with tabs[2], guarded("Insider Signal"):
+with tabs[3], guarded("Insider Signal"):
+    page_header()
     st.subheader("House view: what company insiders do with their own money")
     if signal is None:
         st.info(f"The insider data is not available, so the app uses the past-performance view. ({insider_error})")
@@ -1028,7 +1153,8 @@ with tabs[2], guarded("Insider Signal"):
                    "The market signal uses all US listed companies, including those that later disappeared, so it "
                    "is free of the survivorship bias of our stock list.")
 
-with tabs[3], guarded("Backtest"):
+with tabs[4], guarded("Backtest"):
+    page_header()
     st.subheader(f"Backtest — {profile} profile with the client constraints")
     c1, _ = st.columns([1, 3])
     with c1.container(key="bt-rebalance"):
@@ -1145,7 +1271,8 @@ with tabs[3], guarded("Backtest"):
                        "so its backtest gains are partly hindsight; it also takes more risk than promised. The insider "
                        "view is measured on all US listed companies, including those that later disappeared.")
 
-with tabs[4], guarded("Simulation"):
+with tabs[5], guarded("Simulation"):
+    page_header()
     st.subheader(f"Wealth simulation — {profile} profile, starting with {usd(wealth)}")
     if require_ok(res):
         years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")

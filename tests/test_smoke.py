@@ -401,3 +401,22 @@ def test_missing_insider_data_falls_back(monkeypatch):
         assert any("insider data is not available" in i.value for i in at.info)
     finally:
         st.cache_data.clear()
+
+
+def test_home_tab():
+    at = run_app()
+    assert not at.exception and not at.error
+    home = at.tabs[0]
+    assert home.label == "Home"
+    labels = {m.label: m.value for m in home.metric}
+    assert labels["Risk profile"] == "Balanced"
+    assert {"Expected return p.a. above T-bill", "Expected volatility p.a.", "Insider signal"} <= set(labels)
+    assert labels["Expected volatility p.a."] == "10.0%"                 # the whole budget is used
+    assert any(c.value.startswith("Recommended mix:") for c in home.caption)
+    assert any('<div class="home-title">Private Client Portfolio Optimizer</div>' in md.value
+               for md in home.markdown)                                            # the ribbon carries the name
+    assert not home.title and at.tabs[1].title[0].value == "Private Client Portfolio Optimizer"   # no header on Home
+    steps = next(md.value for md in home.markdown if '<div class="home-steps">' in md.value)
+    assert all(t in steps for t in ["Client Profile", "Portfolio", "Insider Signal", "Backtest", "Simulation"])
+    at = run_app({("selectbox", "profile"): "Conservative"})             # live figures follow the inputs
+    assert {m.label: m.value for m in at.tabs[0].metric}["Risk profile"] == "Conservative"

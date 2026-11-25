@@ -221,7 +221,12 @@ Grading criteria (from the professor) — every feature should serve one of thes
   by golden-section search on the volatility cap (the Sharpe ratio along a concave frontier has one
   peak); capital market line from the T-bill (origin, returns are in excess) through it.
 
-## App (`app.py`, light "mist" UI: five tabs in a floating bottom navigation, no sidebar)
+## App (`app.py`, light "mist" UI: six tabs in a floating bottom navigation, no sidebar)
+0. **Home** (opens first, no page header) — a deep-blue ribbon "Welcome to the Private Client Portfolio
+   Optimizer" (what we do, the insider house view, four highlights), "Today at a glance"
+   (risk profile and volatility budget, expected return and volatility of the recommended portfolio,
+   insider signal; written into a container created at the top, filled once the portfolio is
+   computed) and the five steps of the app, one card per tab.
 1. **Client Profile** — "Client settings" box (wealth, profile override, house view: insider trading
    or past performance, and its confidence; these inputs drive every tab), the questionnaire as an
    accordion, and the resulting profile with the reasons.
@@ -300,4 +305,5 @@ reference/                 # friend's app — read-only inspiration, NEVER copy 
   variables) and the chart palette; the active one is `mist` (light blue-grey, navy accent), chosen for
   readability on a projector. `APP_THEME=<name>` overrides it for a preview. `.streamlit/config.toml`
   must hold the same base and colours (Streamlit's own widgets read them). One accent colour only;
-  on narrow screens (< 820 px) the bottom navigation shrinks so all five tabs fit.
+  the bottom navigation has six tabs: compact buttons below 1200 px, and below 820 px they shrink
+  so all six fit.

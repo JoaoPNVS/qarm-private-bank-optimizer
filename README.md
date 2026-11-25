@@ -12,6 +12,7 @@ Form 4 filings since 2006) tilts the portfolio between equities and bonds.
 
 | Tab | What it shows |
 |---|---|
+| Home | what the app does, today's recommended portfolio and insider signal at a glance, and the five steps |
 | Client Profile | client settings (wealth, profile override, house view and its confidence) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
 | Portfolio | every client constraint with a toggle and a slider (in the "Adjust constraints" panel), preset to the profile; conflicting constraints are named when the portfolio is impossible. Sub-tabs: *Overview* (expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints and the return they cost, minimum-variance and maximum-Sharpe portfolios, capital market line), *Allocation* (by asset class and sector, where the risk comes from: risk contributions and diversification measures), *Bonds* (segments, duration, rating), *Holdings* (weights in USD, trading cost per asset, binding constraints) |
 | Insider Signal | today's breadth of insider buying and the view it implies, its history against SPY, the evidence and its limits, the Black-Litterman view, recent insider purchases in our companies and why we do not bet on single stocks |
