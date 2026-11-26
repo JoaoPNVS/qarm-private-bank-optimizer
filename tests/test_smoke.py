@@ -228,10 +228,6 @@ def test_bond_portfolio_section():
     years = float(labels["Average duration"].split()[0])
     assert 0 < years <= 5.0                                               # Conservative duration limit
     assert any("Share of bonds" in df.value.columns for df in at.dataframe)
-    # past-performance view: no bond floor and negative expected bond returns since 2022, so the Dynamic
-    # profile holds no bonds today (with the insider view, bonds keep their positive equilibrium premium)
-    at = run_app({("selectbox", "profile"): "Dynamic", ("radio", "view_source"): "Past performance"})
-    assert any("No bonds in this portfolio" in i.value for i in at.info)
 
 
 def test_backtest_shows_equal_weight_and_how_to_read():
@@ -354,7 +350,7 @@ def test_risk_contributions_section():
     assert any("SPY carries 100% of the risk" in c.value for c in at.caption)
 
 
-# --- house views: insider trading (default) and past performance ------------------------------
+# --- house view: insider trading only; past performance as a naive backtest comparison ---------
 
 def test_insider_signal_tab():
     at = run_app()
@@ -367,15 +363,16 @@ def test_insider_signal_tab():
     assert any("insider view" in c.value for c in at.caption)                       # Portfolio caption
 
 
-def test_past_performance_view_still_works():
-    at = run_app({("radio", "view_source"): "Past performance"})
-    assert not at.exception and not at.error
-    assert any("recent average return as a view" in c.value for c in at.caption)
-    r10 = metric(at, "Expected return above T-bill")
-    at.slider(key="views").set_value(0)
+def test_insider_is_the_only_house_view():
+    """No house-view choice in the client settings: the client sets only the confidence in the insider view."""
+    at = run_app()
+    assert not any(r.key == "view_source" for r in at.radio)
+    assert not any(s.key == "views" for s in at.slider)                              # no past-performance slider
+    r50 = metric(at, "Expected return above T-bill")
+    at.slider(key="views_insider").set_value(0)
     at.run(timeout=TIMEOUT)
     assert not at.exception and not at.error
-    assert metric(at, "Expected return above T-bill") != r10
+    assert metric(at, "Expected return above T-bill") != r50
 
 
 def test_compare_house_views():
@@ -383,6 +380,7 @@ def test_compare_house_views():
     assert not at.exception and not at.error
     table = next(df.value for df in at.dataframe if "Estimated volatility (ex ante)" in df.value.columns)
     assert len(table) == 3 and table["Sharpe ratio"].notna().all()
+    assert any(name.startswith("Naive: past performance") for name in table.index)
 
 
 def test_missing_insider_data_falls_back(monkeypatch):
@@ -397,7 +395,7 @@ def test_missing_insider_data_falls_back(monkeypatch):
     try:
         at = run_app()
         assert not at.exception and not at.error
-        assert at.radio(key="view_source").options == ["Past performance"]
+        assert at.slider(key="views_insider_off").disabled                             # equilibrium, no view
         assert any("insider data is not available" in i.value for i in at.info)
     finally:
         st.cache_data.clear()
