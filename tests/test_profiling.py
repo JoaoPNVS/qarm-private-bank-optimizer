@@ -1,4 +1,3 @@
-import numpy as np
 import pytest
 
 from src import data, estimators as est, optimizer as opt, profiling as prof

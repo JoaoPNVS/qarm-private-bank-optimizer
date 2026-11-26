@@ -108,7 +108,7 @@ def max_volatility(limit: float = 0.10) -> Constraint:
     return Constraint(
         VOL_KEY, "Maximum volatility", {"limit": limit},
         lambda w, d, p: [Part(f"Volatility <= {p['limit']:.0%}", cp.norm(d.sqrt_cov @ w, 2) <= p["limit"])],
-        lambda p: f"Expected annual volatility at most {p['limit']:.0%}.")
+        lambda p: f"Estimated annual volatility at most {p['limit']:.0%}.")
 
 
 def _cap_per_vehicle(vehicle: str, label: str):
@@ -259,8 +259,8 @@ def max_cash(limit: float = 0.10) -> Constraint:
         return [Part(f"Cash <= {p['limit']:.0%}", m @ w <= p["limit"], degenerate=p["limit"] <= 0)]
 
     return Constraint(
-        "max_cash", "Maximum cash", {"limit": limit}, build,
-        lambda p: f"At most {p['limit']:.0%} of the portfolio in cash.")
+        "max_cash", "Maximum cash & equivalents", {"limit": limit}, build,
+        lambda p: f"At most {p['limit']:.0%} of the portfolio in cash and cash-like funds (BIL, FLOT).")
 
 
 # --- solving --------------------------------------------------------------------------------

@@ -99,14 +99,14 @@ def assess(answers: dict[str, int]) -> Assessment:
     level = min(cap, will)
     reasons = [f"Risk capacity score {dims['capacity']:.2f}/4 -> {PROFILES[cap]}.",
                f"Risk willingness score {dims['willingness']:.2f}/4 -> {PROFILES[will]}.",
-               f"The lower of the two is retained: {PROFILES[level]}."]
+               f"We keep the more prudent of the two: {PROFILES[level]}."]
     cap_name = KNOWLEDGE_CAP.get(scores["knowledge"])
     if cap_name and level > PROFILES.index(cap_name):
         level = PROFILES.index(cap_name)
         reasons.append(f"Limited investment knowledge: profile capped at {cap_name}.")
     if answers["horizon"] == SHORT_HORIZON_ANSWER and level > 0:
         level = 0
-        reasons.append("Investment horizon below 3 years: Conservative profile required.")
+        reasons.append("Horizon below 3 years: the profile is Conservative whatever the other answers.")
     return Assessment(PROFILES[level], scores, dims,
                       {"capacity": PROFILES[cap], "willingness": PROFILES[will]}, reasons)
 

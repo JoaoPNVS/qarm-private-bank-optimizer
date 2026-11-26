@@ -15,15 +15,6 @@ def test_drawdowns_include_initial_capital_and_later_peaks():
     assert np.isclose(risk.performance_metrics(returns, pd.Series(0.0, index=dates))["max_drawdown"], -0.20)
 
 
-def test_portfolio_history_uses_common_months():
-    ret = data.load_returns()
-    w = pd.Series({"AAPL": 0.5, "PLTR": 0.5, "MSFT": 1e-6})  # dust ignored
-    h = risk.portfolio_history(w, ret)
-    assert h.index[0] == ret["PLTR"].first_valid_index()
-    t = h.index[5]
-    assert np.isclose(h[t], 0.5 * ret.loc[t, "AAPL"] + 0.5 * ret.loc[t, "PLTR"], rtol=1e-3)
-
-
 def test_block_bootstrap_draws_contiguous_shared_blocks():
     idx = pd.date_range("2000-01-31", periods=60, freq="ME")
     hist = pd.DataFrame({"a": np.arange(60) / 1000, "b": -np.arange(60) / 1000}, index=idx)

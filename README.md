@@ -13,69 +13,60 @@ Form 4 filings since 2006) tilts the portfolio between equities and bonds.
 | Tab | What it shows |
 |---|---|
 | Home | what the app does, today's recommended portfolio and insider signal at a glance, and the five steps |
-| Client Profile | client settings (wealth, profile override, house view and its confidence) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
+| Client Profile | client settings (wealth, profile override, confidence in the insider house view) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
 | Portfolio | every client constraint with a toggle and a slider (in the "Adjust constraints" panel), preset to the profile; conflicting constraints are named when the portfolio is impossible. Sub-tabs: *Overview* (expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints and the return they cost, minimum-variance and maximum-Sharpe portfolios, capital market line), *Allocation* (by asset class and sector, where the risk comes from: risk contributions and diversification measures), *Bonds* (segments, duration, rating), *Holdings* (weights in USD, trading cost per asset, binding constraints) |
 | Insider Signal | today's breadth of insider buying and the view it implies, its history against SPY, the evidence and its limits, the Black-Litterman view, recent insider purchases in our companies and why we do not bet on single stocks |
-| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; estimated vs realised volatility; allocation over time; side-by-side comparison of the house views |
+| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; estimated vs realised volatility; allocation over time; comparison with naive expected returns (past performance) and with no view |
 | Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark: range of outcomes, loss beyond the client's limit, worst fall, one-year VaR and expected shortfall |
 
 The "About Us" button (top right) presents the project and the team.
 
 ## Methodology
 
-- **Profiles.** Risk capacity, risk willingness and knowledge are scored separately; the profile
-  is the lower of capacity and willingness, capped by knowledge (horizon < 3 years → Conservative).
-  Each profile has a volatility cap (6 / 10 / 12 / 15%) equal to the historical volatility of its
-  benchmark rounded up, and a minimum share in bond funds (70 / 40 / 20 / 0%).
-- **Optimisation.** Long-only, fully invested: maximise expected return subject to
-  `volatility ≤ cap` and the client constraints, minus each asset's trading cost on the trades
-  (cvxpy, CLARABEL solver).
-- **Expected returns: Black-Litterman.** Prior = market-equilibrium returns from reverse
-  optimisation, `pi = delta x Cov(asset, market)` with a 60% SPY / 40% AGG market portfolio and
-  delta = 2.5, combined with a house view chosen in the client settings, with He & Litterman's
-  uncertainty `Omega = diag(P tau Sigma P') (1 - c) / c` (tau = 0.05, c = confidence).
-  - **Insider trading (default).** Breadth of insider buying: each month, count the US listed
-    companies whose officers or directors bought their own shares on the open market, and those
-    whose insiders sold; breadth = purchases / (purchases + sales), each count added up over the
-    last 3 months (company-months: a company active in several months, or on both sides, counts each
-    time). Compared with its last 5 years (z-score, capped at ±2), it gives one
-    relative view: equities (SPY) beat bonds (AGG) by the equilibrium spread + 2% × z. Default
-    confidence 50%. Breadth peaked at the market lows of 2008–09, 2011 and 2020; after the fifth of
-    months with the broadest buying, SPY beat the T-bill by about 20% over the next year, against
-    about 12% otherwise (modest and noisy evidence, shown in the app with its limits). Insider
-    purchases of single large companies showed no edge, so they are displayed but not used.
-    Backtest May 2012 – Sep 2026 against no view: slightly higher Sharpe in every profile (Balanced
-    1.05 vs 1.04), about the same drawdowns, and 10.3% realised volatility over the whole backtest
-    for a 10% volatility budget. A small gain, not a proof.
-  - **Past performance.** Views = each asset's 60-month average return (default confidence 10%).
-    Higher backtest Sharpe (Balanced 1.13), but higher realised volatility over the whole backtest
-    (11.2% for a 10% volatility budget), deeper drawdowns, about twice the turnover, and partly
-    hindsight: it favours past winners in a list of today's winners.
-- **Timing.** In the backtest each rebalancing decided at a month-end trade uses data up to the
-  previous month-end only (returns, covariance, insider filings), and trades at the close of the
-  rebalancing month: a one-month implementation lag. Deciding and trading at the same close was
-  slightly flattering (Sharpe +0.01 to +0.03 in every profile).
-- **Risk:** Ledoit-Wolf covariance on standardised returns over a rolling 60-month window. An
-  asset is used only once it has 60 months of history.
-- **Constraints.** Volatility cap; minimum bonds; at most 10% cash and cash equivalents; at most
-  8% per stock, 15% per bond fund, 20% per other fund, 40% per equity sector; emerging markets at
-  most 1/3 of equities; bond duration, investment-grade and high-yield limits by profile;
-  exclusions of sectors or companies.
-- **Trading costs** by liquidity tier, from each asset's average daily dollar volume: 2 / 5 / 10 bps
-  for stocks, 8 bps for high-yield and EM bond funds, 3 bps for other funds, 0 for cash.
-- **Backtest.** Re-optimised every 3 (or 6 / 12) months using only past data, weights drift in
-  between, costs charged on every trade. Benchmarks: SPY, a SPY / AGG mix per profile
-  (30/70, 60/40, 80/20, 100/0) and an equal-weight portfolio of the same stocks and bond funds.
-- **Simulation.** 5,000 paths built from random 12-month blocks of the strategy's out-of-sample
-  backtest returns (2012–2026, each portfolio chosen with past data only, costs deducted), the
-  benchmark on the same blocks. Risk shown as the chance of a one-year loss above the limit the
-  client stated in the questionnaire, the worst fall from a peak (typical and 5% worst case), and
-  the one-year value at risk and expected shortfall (CVaR) at 95%.
-- **Risk analysis.** Risk contributions by asset and asset class (Euler decomposition of the
-  volatility: marginal, absolute and relative contributions), compared with the benchmark;
-  diversification measures (Herfindahl index and effective number of positions, Shannon entropy,
-  Gini coefficient, diversification ratio). On the efficient frontier: the minimum-variance and
-  maximum-Sharpe (tangency) portfolios under the client's constraints and the capital market line.
+- **Profiles.** Risk capacity, risk willingness and knowledge are scored separately. The profile
+  is the lower of capacity and willingness, capped by knowledge; a horizon under 3 years always
+  gives Conservative. Each profile has a volatility budget (6 / 10 / 12 / 15%, its benchmark's
+  historical volatility rounded up) and a minimum share in bond funds (70 / 40 / 20 / 0%).
+- **Optimisation.** Long-only and fully invested: maximise expected return subject to
+  `volatility ≤ budget` and the client constraints, net of each asset's trading cost (cvxpy,
+  CLARABEL solver).
+- **Constraints.** At most 10% cash and cash equivalents; at most 8% per stock, 15% per bond
+  fund, 20% per other fund and 40% per equity sector; emerging markets at most 1/3 of equities;
+  bond duration, investment-grade and high-yield limits by profile; optional exclusions.
+- **Expected returns: Black-Litterman.** The prior is the market equilibrium, from reverse
+  optimisation on a 60% SPY / 40% AGG market (`pi = 2.5 × Cov(asset, market)`). It is tilted by
+  one house view, with He & Litterman's uncertainty `Omega = diag(P tau Sigma P') (1 - c) / c`
+  (tau = 0.05); the client chooses only the confidence c (default 50%).
+- **House view: insider trading.** Each month we count the US listed companies whose officers or
+  directors bought their own shares on the open market, and those whose insiders sold. Breadth =
+  purchases / (purchases + sales), each count added up over 3 months (so a company active in
+  several months, or on both sides, counts each time). Its z-score against the last 5 years
+  (capped at ±2) gives one view: SPY beats AGG by the equilibrium spread + 2% × z.
+  - *Evidence:* breadth peaked at the market lows of 2008–09, 2011 and 2020. After the fifth of
+    months with the broadest buying, SPY beat the T-bill by about 20% over the next year,
+    against about 12% otherwise; modest, noisy evidence, shown in the app with its limits.
+    Purchases in single large companies showed no edge, so they are displayed but not used.
+  - *Backtest (May 2012 – Sep 2026) against no view:* slightly higher Sharpe in every profile
+    (Balanced 1.05 vs 1.04), similar drawdowns. A small gain, not a proof.
+  - *Naive comparison (Backtest tab only):* each asset's 60-month average return as a view
+    (10% confidence), a bet that recent winners keep winning. Higher Sharpe (Balanced 1.13), but
+    11.2% realised volatility for a 10% budget, deeper drawdowns, twice the turnover, and partly
+    hindsight. Not offered to clients.
+- **Risk.** Ledoit-Wolf covariance on standardised returns over a rolling 60-month window; an
+  asset is used only once it has 60 months of history. Risk contributions (Euler decomposition)
+  and diversification measures (Herfindahl, entropy, Gini, diversification ratio); efficient
+  frontier with the minimum-variance and maximum-Sharpe portfolios and the capital market line.
+- **Trading costs** by liquidity tier, from average daily dollar volume: 2 / 5 / 10 bps for
+  stocks, 8 bps for high-yield and EM bond funds, 3 bps for other funds, 0 for cash.
+- **Backtest.** Re-optimised every 3 (or 6 / 12) months, weights drift in between, costs charged
+  on every trade. Each decision uses data up to the previous month-end and trades at the close of
+  the rebalancing month (deciding and trading at the same close would add 0.01–0.03 of Sharpe).
+  Compared with SPY, a SPY / AGG benchmark per profile (30/70, 60/40, 80/20, 100/0) and an
+  equal-weight portfolio of the same stocks and bond funds.
+- **Simulation.** 5,000 paths of random 12-month blocks of the strategy's out-of-sample backtest
+  returns, with the benchmark on the same blocks. Risk shown as the chance of a one-year loss
+  above the client's stated limit, the worst fall from a peak, and one-year VaR and expected
+  shortfall at 95%.
 
 ## Data
 
@@ -99,32 +90,22 @@ network.
 
 ## Limitations
 
-- **Survivorship bias.** The stock list is today's index membership applied to the past:
-  companies that failed or left the indices are missing. Backtests and simulations of the
-  strategy are therefore optimistic. SPY and the profile benchmarks are not affected; the
-  equal-weight portfolio has the same bias, so comparing with it removes the bias from the
-  comparison. But that gap does not isolate the optimisation either: the equal-weight portfolio
-  also ignores the volatility budget and the bond-sleeve limits (with today's fund data its bonds
-  average 6.4 years of duration and 15% high yield, beyond what the Conservative and Balanced
-  profiles allow), so the two portfolios differ in allocation and constraints, not only in method.
+- **Survivorship bias.** The stock list is today's index membership applied to the past, so
+  companies that failed or left the indices are missing and the strategy's backtest and
+  simulation are optimistic. SPY and the profile benchmarks are not affected.
+- **Equal weight.** The strategy does not beat the equal-weight portfolio of the same universe
+  (Balanced Sharpe 1.05 vs 1.14, every profile below it), a known result with short estimation
+  windows (DeMiguel, Garlappi and Uppal, 2009). The gap is not the effect of optimisation alone:
+  equal weight ignores the volatility budget and the bond limits (its bonds average 6.4 years of
+  duration and 15% high yield, beyond the Conservative and Balanced limits). The strategy does
+  beat its profile benchmark (Balanced 1.05 vs 0.84).
+- **Volatility budget.** It caps the estimate at each rebalancing, not future volatility. For
+  Balanced, realised volatility over the whole backtest is 10.3% for a 10% budget.
+- **Calibration.** The volatility caps use 2003–2026 data, after the backtest start. On data
+  available in January 2012 they would be the same or higher (Growth 13%, Dynamic 16%), so this
+  does not flatter the backtest.
 - Bond fund durations and ratings are current values applied to the whole history.
-- The volatility caps are calibrated on the full 2003–2026 history, which includes years after the
-  backtest start (2012). On the data available at the start (to January 2012) alone they would have been the same
-  (Conservative 6%, Balanced 10%) or higher (Growth 13%, Dynamic 16%, because 2003–2011 includes
-  2008), so this choice does not flatter the backtest.
-- The volatility budget applies to estimated volatility at each rebalancing, not to a guaranteed
-  future maximum. Realised volatility can exceed it. For the Balanced profile, annualised
-  realised volatility over the entire backtest is 10.3% with the default insider view at 50%
-  confidence and 11.2% with the past-performance view at its 10% default confidence, for a 10%
-  budget. The app also reports the average realised volatility over the following 12 months at
-  each eligible rebalancing; those windows may overlap and are a different measure from the
-  volatility of the full backtest.
-- The optimised strategy does not beat the equal-weight portfolio of the same universe (Balanced
-  Sharpe 1.05 vs 1.14, every profile below it), a well-known result with short estimation windows
-  (DeMiguel, Garlappi and Uppal, 2009). It does beat its profile benchmark (Balanced 1.05 vs 0.84)
-  while keeping close to the volatility budget, which the equal-weight portfolio does not try to
-  respect.
-- The simulation resamples history only; its range is only as wide as the past it was built from.
+- The simulation only resamples the past; its range is as wide as that history.
 - Educational project, not investment advice.
 
 ## Run locally
@@ -142,7 +123,7 @@ streamlit run app.py
 ```
 
 Tests: `pytest -m "not slow"` (fast, ~45 s) during development, `pytest` for the full suite
-including the app scenarios (~7 min).
+including the app scenarios (~15 min).
 
 ## Deploy on Streamlit Community Cloud
 

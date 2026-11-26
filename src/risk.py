@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 MONTHS_PER_YEAR = 12
-DUST = 1e-4  # solver residual weights ignored when rebuilding a portfolio's history
 TAIL = 0.05  # value at risk / expected shortfall level (worst 5% of simulated years)
 
 
@@ -27,17 +26,6 @@ def performance_metrics(returns: pd.Series, rf: pd.Series) -> dict:
             "volatility": vol,
             "sharpe": excess.mean() * MONTHS_PER_YEAR / vol if vol > 0 else np.nan,
             "max_drawdown": drawdowns(r).min()}
-
-
-def portfolio_history(weights: pd.Series, returns: pd.DataFrame) -> pd.Series:
-    """Monthly returns of today's weights (rebalanced monthly) over the months where every held
-    asset has a return, i.e. since the youngest holding started trading."""
-    w = weights[weights > DUST]
-    w = w / w.sum()
-    r = returns[w.index].dropna()
-    if r.empty:
-        raise ValueError("The held assets have no common return history.")
-    return (r @ w).rename("Portfolio")
 
 
 def block_bootstrap(history: pd.DataFrame, horizon_months: int, n_sims: int = 5000, block: int = 12,

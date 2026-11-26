@@ -134,12 +134,13 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - **Objective: maximise expected return under the profile's volatility cap.** Long-only, fully
   invested: max w'mu s.t. sqrt(w'Sigma w) <= sigma_max(profile) and the client constraints
   (+ L1 transaction-cost penalty when current holdings are given, e.g. in the backtest).
-- **Expected returns: Black-Litterman** with a choice of HOUSE VIEW (Client settings).
+- **Expected returns: Black-Litterman** with ONE HOUSE VIEW, insider trading (team decision); the client
+  sets only its confidence (Client settings). Without the insider files: equilibrium returns, no view.
   Prior = equilibrium returns by reverse optimisation, pi = delta Cov(asset, market) with
   market = 60% SPY / 40% AGG and delta = 2.5. General posterior for any views
   (`black_litterman_posterior` in `src/estimators.py`): mu = pi + tau Sigma P'(P tau Sigma P' + Omega)^-1
   (Q - P pi), Omega = diag(P tau Sigma P') (1 - c) / c, tau = 0.05 (He & Litterman).
-- **House view 1 (DEFAULT): insider trading** (`src/insiders.py`). Breadth of insider buying = buying
+- **House view: insider trading** (`src/insiders.py`). Breadth of insider buying = buying
   company-months / (buying + selling company-months) over the last 3 months: each month, the number of
   US listed companies whose officers/directors bought on the open market and the number whose insiders
   sold, each added up over 3 months (a company active in several months, or on both sides, counts each
@@ -158,9 +159,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
   +0.03 in every profile, drawdowns about the same, realised volatility at the budget (Balanced
   1.05 vs 1.04, 10.3% realised, max DD -20.3% vs -20.3%). The breadth uses ALL listed companies, so it is free of our universe's
   survivorship bias.
-- **House view 2: past performance** (`black_litterman_mu`, `with_view_confidence`). Views = every
-  asset's 60-month historical mean (P = identity). c = "confidence in past performance", a
-  slider 0-25%, default 10%; 0% = pure equilibrium. The views are correlated and reinforce each other: at 10% a
+- **Naive comparison (Backtest tab only, not offered to clients): past performance**
+  (`black_litterman_mu`, `with_view_confidence`). Views = every
+  asset's 60-month historical mean (P = identity). c = 10% (fixed in the
+  comparison; 0% = pure equilibrium). The views are correlated and reinforce each other: at 10% a
   typical asset moves about a third of the way to its historical mean, SPY most of the way.
   Backtest 2012-05 to 2026-09, Balanced: Sharpe 1.13 (old method 0.88, equal weight 1.14), realised
   volatility 11.2% for a 10% budget (old 12.6%); c = 0: 10.6% (10.1% on average over the 12 months
@@ -169,7 +171,7 @@ Grading criteria (from the professor) — every feature should serve one of thes
   portfolio and the benchmarks (SPY, AGG) get their expected returns from the same posterior.
   Its higher backtest Sharpe comes with more risk than promised in every profile (e.g. 7.1% for a
   6% budget), deeper drawdowns and about twice the turnover, and partly with hindsight: it favours past
-  winners in a list of today's winners. Hence the insider view is the default.
+  winners in a list of today's winners. Hence the insider view is the only house view.
 - Previous method, kept for comparison and tests: historical mean over the 60-month window, shrunk toward the grand mean of
   the asset's shrinkage group: mu_i = (1 - a) m_i + a m_group, **a = 0.8**. Groups = asset
   classes, except **bonds, grouped by maturity bucket** (Short / Intermediate / Long): with 15
@@ -242,9 +244,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
    (risk profile and volatility budget, expected return and volatility of the recommended portfolio,
    insider signal; written into a container created at the top, filled once the portfolio is
    computed) and the five steps of the app, one card per tab.
-1. **Client Profile** — "Client settings" box (wealth, profile override, house view: insider trading
-   or past performance, and its confidence; these inputs drive every tab), the questionnaire as an
-   accordion, and the resulting profile with the reasons.
+1. **Client Profile** — "Client settings" box (wealth, profile override, confidence in the insider
+   house view; these inputs drive every tab), the questionnaire as an accordion, and the resulting
+   profile with the reasons.
 2. **Portfolio** — "Adjust constraints" expander (each constraint with its toggle/slider, preset to
    the profile defaults; clear message naming the conflicting constraints when infeasible) and four
    sub-tabs:
@@ -264,8 +266,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
    view table, recent purchases in our companies and the stock-level event study (why we do not bet
    on single stocks), data source and coverage.
 4. **Backtest** — cumulative performance vs SPY and profile benchmark, ex-ante vs realised
-   volatility, drawdowns, allocation over time, then the metrics and trading tables; a "Compare the
-   house views" toggle backtests insider (50%), past performance (10%) and no view side by side.
+   volatility, drawdowns, allocation over time, then the metrics and trading tables; a "Compare with
+   naive expected returns" toggle backtests the insider view (client's confidence), the naive
+   past-performance view (10%) and no view side by side.
 5. **Simulation** — wealth fan chart, median / 5% / 95% outcomes, one-year loss beyond the client's
    stated limit, worst fall, one-year VaR and expected shortfall, vs benchmark.
 - **About Us** — a dialog opened by the top-right button: short project presentation and one card
