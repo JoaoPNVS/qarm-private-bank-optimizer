@@ -234,7 +234,7 @@ def exclusions(tickers: list[str] | None = None, sectors: list[str] | None = Non
 
     def describe(p):
         items = [f"the {s} sector" for s in p["sectors"]] + p["tickers"]
-        return "Never invest in: " + (", ".join(items) or "nothing excluded") + "."
+        return ("Never invest in: " + ", ".join(items) + ".") if items else "No exclusions."
 
     return Constraint("exclusions", "Exclusions (sectors or companies)",
                       {"tickers": list(tickers or []), "sectors": list(sectors or [])}, build, describe)
@@ -250,7 +250,8 @@ def min_bonds(min_share: float = 0.20) -> Constraint:
 
     return Constraint(
         "min_bonds", "Minimum bonds", {"min_share": min_share}, build,
-        lambda p: f"At least {p['min_share']:.0%} of the portfolio in bond funds.")
+        lambda p: f"At least {p['min_share']:.0%} of the portfolio in bond funds." if p["min_share"] > 0
+        else "No minimum in bond funds.")
 
 
 def max_cash(limit: float = 0.10) -> Constraint:
