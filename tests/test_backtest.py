@@ -29,17 +29,25 @@ def test_rebalance_dates(inputs):
     q = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Quarterly")
     s = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Semi-annual")
     a = btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Annual")
-    assert q[0] == s[0] == a[0] == pd.Timestamp("2012-01-31")
-    assert {d.month for d in q} == {1, 4, 7, 10} and {d.month for d in a} == {1}
+    assert q[0] == s[0] == a[0] == pd.Timestamp("2012-04-30")
+    assert {d.month for d in q} == {1, 4, 7, 10} and {d.month for d in a} == {4}
     assert set(a) <= set(s) <= set(q)
     with pytest.raises(btm.BacktestError):
         btm.rebalance_dates(ret.index, btm.DEFAULT_START, "Weekly")
 
 
+def test_decisions_use_the_previous_month_only(inputs, estimates):
+    """Trades at the close of t are decided with data up to t-1 (one month of implementation lag)."""
+    _, ret, _ = inputs
+    for d, e in estimates.items():
+        assert e.end == btm.information_date(ret.index, d) and e.end < d
+        assert e.end == ret.index[ret.index.get_loc(d) - 1]
+
+
 def test_weights_valid_every_month(balanced):
     w = balanced.weights
     assert np.allclose(w.sum(axis=1), 1) and (w >= -1e-9).all().all()
-    assert balanced.returns.index[0] == pd.Timestamp("2012-02-29")
+    assert balanced.returns.index[0] == pd.Timestamp("2012-05-31")
     assert len(balanced.returns) == len(w) - 1
 
 
@@ -105,11 +113,11 @@ def test_infeasible_rebalancing_keeps_weights(inputs, estimates):
 
 def test_infeasible_start_is_a_clear_error(inputs, estimates):
     uni, ret, rf = inputs
-    # 95% in bonds at most 10% per fund needs ten bond funds; only seven existed in 2012-01
+    # 95% in bonds at most 10% per fund needs ten bond funds; only eight were eligible in 2012-03
     with pytest.raises(btm.BacktestError, match="first rebalancing") as err:
         btm.run_backtest(ret, rf, uni, [opt.max_volatility(0.10), opt.min_bonds(0.95), opt.max_bond_etf_weight(0.10)],
                          estimates=estimates)
-    assert "including 7 bond funds" in str(err.value) and "Minimum bonds" in str(err.value)
+    assert "including 8 bond funds" in str(err.value) and "Minimum bonds" in str(err.value)
 
 
 def test_performance_metrics():
@@ -180,7 +188,7 @@ def test_black_litterman_feasible_at_every_rebalancing(inputs, bl_estimates, pro
     assert not res.events and (res.rebalances["status"] == "ok").all()
 
 
-def test_equilibrium_keeps_the_volatility_promise(inputs, bl_estimates):
+def test_equilibrium_realised_volatility_near_estimated_budget(inputs, bl_estimates):
     # documented result: with zero view confidence the realised volatility matches the 10% budget
     uni, ret, rf = inputs
     res = btm.run_backtest(ret, rf, uni, prof.default_constraints("Balanced"),

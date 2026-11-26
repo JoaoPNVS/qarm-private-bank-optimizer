@@ -46,7 +46,7 @@ def test_incompatible_constraints_show_message():
 def test_backtest_tab_annual_rebalancing():
     at = run_app({("selectbox", "bt.freq"): "Annual"})
     assert not at.exception and not at.error and not at.warning
-    assert any("Average ex-ante volatility" in c.value for c in at.caption)
+    assert any("Average estimated volatility at rebalancing" in c.value for c in at.caption)
 
 
 def backtest_metrics(at):
@@ -381,7 +381,7 @@ def test_past_performance_view_still_works():
 def test_compare_house_views():
     at = run_app({("toggle", "bt.compare"): True})
     assert not at.exception and not at.error
-    table = next(df.value for df in at.dataframe if "Promised volatility" in df.value.columns)
+    table = next(df.value for df in at.dataframe if "Estimated volatility (ex ante)" in df.value.columns)
     assert len(table) == 3 and table["Sharpe ratio"].notna().all()
 
 
@@ -410,8 +410,8 @@ def test_home_tab():
     assert home.label == "Home"
     labels = {m.label: m.value for m in home.metric}
     assert labels["Risk profile"] == "Balanced"
-    assert {"Expected return p.a. above T-bill", "Expected volatility p.a.", "Insider signal"} <= set(labels)
-    assert labels["Expected volatility p.a."] == "10.0%"                 # the whole budget is used
+    assert {"Expected return p.a. above T-bill", "Estimated volatility p.a.", "Insider signal"} <= set(labels)
+    assert labels["Estimated volatility p.a."] == "10.0%"                 # the whole budget is used
     assert any(c.value.startswith("Recommended mix:") for c in home.caption)
     assert any('<div class="home-title">Private Client Portfolio Optimizer</div>' in md.value
                for md in home.markdown)                                            # the ribbon carries the name

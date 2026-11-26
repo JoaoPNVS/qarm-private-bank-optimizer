@@ -25,12 +25,13 @@ Expected returns, two methods.
    views are correlated and reinforce each other: at c = 10% a typical asset moves about a third of
    the way from pi to its historical mean, and SPY most of the way. The pooling acts mainly on the
    broad market direction (equities vs bonds), much less on picking individual winners.
-   Backtest 2012-2026 (Balanced): c = 0 keeps the 10% volatility promise (10.0% realised, 41%
-   turnover); c = 10% (default) gives the best Sharpe (1.15 vs 0.97 for method 2) with 11.1%
-   realised volatility; c = 25% adds turnover and risk without improving the Sharpe. The
-   alternative Omega proportional to the FULL tau Sigma (posterior exactly (1 - c) pi + c m for
-   every asset) was tested and rejected: any c > 0 brought back the concentration on recent winners
-   (Balanced, c = 10%: Sharpe 0.98, 11.8% realised volatility).
+   Backtest 2012-05 to 2026-09 (Balanced, past-performance views, decisions with data to the
+   previous month-end): c = 0 gives 10.6% volatility over the whole backtest for a 10% budget (42%
+   turnover); c = 10% (default for these views) gives a Sharpe of 1.13 (0.88 for method 2) with
+   11.2% volatility and 148% turnover. Measured with the earlier same-close timing: c = 25% added
+   turnover and risk without improving the Sharpe, and the alternative Omega proportional to the
+   FULL tau Sigma (posterior exactly (1 - c) pi + c m for every asset) was rejected because any
+   c > 0 brought back the concentration on recent winners (Balanced, c = 10%: Sharpe 0.98).
 
 2. SHRINKAGE toward group means (the original method, kept for comparison and tests).
 Historical mean over the window, shrunk toward the grand mean of the asset's

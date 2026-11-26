@@ -5,6 +5,16 @@ import pytest
 from src import data, risk
 
 
+def test_drawdowns_include_initial_capital_and_later_peaks():
+    dates = pd.date_range("2020-01-31", periods=4, freq="ME")
+    returns = pd.Series([-0.10, 0.05, 0.10, -0.20], index=dates)
+    actual = risk.drawdowns(returns)
+    assert actual.index.equals(dates)
+    assert np.allclose(actual, [-0.10, -0.055, 0.0, -0.20])
+    assert np.isclose(risk.performance_metrics(returns.iloc[:2], pd.Series(0.0, index=dates[:2]))["max_drawdown"], -0.10)
+    assert np.isclose(risk.performance_metrics(returns, pd.Series(0.0, index=dates))["max_drawdown"], -0.20)
+
+
 def test_portfolio_history_uses_common_months():
     ret = data.load_returns()
     w = pd.Series({"AAPL": 0.5, "PLTR": 0.5, "MSFT": 1e-6})  # dust ignored

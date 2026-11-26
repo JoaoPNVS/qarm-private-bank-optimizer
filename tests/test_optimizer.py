@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -174,3 +176,54 @@ def test_bond_rules_not_binding_without_bonds(estimates, universe):
     assert res.ok and res.weights[universe.loc[res.weights.index, "asset_class"] == "Bond"].sum() < 1e-3
     active = set(res.duals.loc[res.duals["active"], "key"])
     assert not active & opt.BOND_SLEEVE_KEYS and "max_volatility" in active
+
+
+# --- shadow prices in each bound's own unit -----------------------------------------------------
+
+RELAX = {"max_volatility": ("limit", 0.001, 100), "min_bonds": ("min_share", -0.001, 100),
+         "max_bond_duration": ("limit", 0.02, 1), "min_investment_grade": ("min_share", -0.001, 100),
+         "em_equity_cap": ("ratio", 0.001, 100), "max_high_yield": ("limit", 0.001, 100)}
+
+
+@pytest.fixture(scope="module")
+def tilted(universe):
+    """Today's Black-Litterman estimates with higher expected returns on long, high-yield and EM
+    assets, so that the ratio constraints bind."""
+    from src import benchmarks as bm, profiling as prof
+    ret = data.load_returns()
+    e = est.with_view_confidence(est.estimate(est.estimation_window(ret, ret.index[-1], 60), data.load_rf(),
+                                              est.shrinkage_groups(universe), benchmarks=data.load_benchmark_returns(),
+                                              benchmark_class=bm.BENCHMARK_CLASS), 0.10)
+    mu = e.mu.copy()
+    mu[mu.index.intersection(["EEM", "TLT", "VCLT", "HYG", "EMB", "PDD", "MELI"])] += 0.06
+    return prof.problem_data("Balanced", replace(e, mu=mu), universe), prof
+
+
+@pytest.mark.parametrize("profile,overrides", [("Balanced", {"em_equity_cap": 0.05}), ("Conservative", {})])
+def test_shadow_prices_match_finite_differences(tilted, profile, overrides):
+    """bps_per_unit = gain in expected return per unit of relaxation, checked by re-solving with the bound
+    moved a little: ratio bounds (duration, investment grade, EM) are scaled by their sleeve."""
+    d, prof = tilted
+    cons = [c.with_params(**{RELAX[c.key][0]: overrides[c.key]}) if c.key in overrides else c
+            for c in prof.default_constraints(profile)]
+    base = opt.solve(d, cons)
+    act = base.duals[base.duals["active"]].drop_duplicates("key").set_index("key")
+    checked = set()
+    for key, (param, h, per_unit) in RELAX.items():
+        if key not in act.index:
+            continue
+        moved = [c.with_params(**{param: c.params[param] + h}) if c.key == key else c for c in cons]
+        fd = (opt.solve(d, moved).expected_return - base.expected_return) / abs(h) / per_unit * 1e4
+        assert act.at[key, "bps_per_unit"] == pytest.approx(fd, rel=0.08, abs=0.05), key
+        checked.add(key)
+    expected = {"max_volatility", "max_bond_duration"} | (
+        {"em_equity_cap", "min_investment_grade"} if profile == "Balanced" else {"max_high_yield"})
+    assert expected <= checked
+    assert act.at["max_bond_duration", "unit"] == "+1 year"
+
+
+def test_shadow_price_not_reported_at_a_zero_limit(tilted):
+    d, prof = tilted
+    cons = [c.with_params(limit=0.0) if c.key == "max_high_yield" else c for c in prof.default_constraints("Balanced")]
+    duals = opt.solve(d, cons).duals.set_index("key")
+    assert duals.at["max_high_yield", "active"] and np.isnan(duals.at["max_high_yield", "bps_per_unit"])

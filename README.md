@@ -16,7 +16,7 @@ Form 4 filings since 2006) tilts the portfolio between equities and bonds.
 | Client Profile | client settings (wealth, profile override, house view and its confidence) and the 7-question suitability questionnaire → Conservative / Balanced / Growth / Dynamic, with the reasons |
 | Portfolio | every client constraint with a toggle and a slider (in the "Adjust constraints" panel), preset to the profile; conflicting constraints are named when the portfolio is impossible. Sub-tabs: *Overview* (expected return / volatility / Sharpe vs the profile benchmark and SPY, efficient frontier with and without the client's constraints and the return they cost, minimum-variance and maximum-Sharpe portfolios, capital market line), *Allocation* (by asset class and sector, where the risk comes from: risk contributions and diversification measures), *Bonds* (segments, duration, rating), *Holdings* (weights in USD, trading cost per asset, binding constraints) |
 | Insider Signal | today's breadth of insider buying and the view it implies, its history against SPY, the evidence and its limits, the Black-Litterman view, recent insider purchases in our companies and why we do not bet on single stocks |
-| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; promised vs realised volatility; allocation over time; side-by-side comparison of the house views |
+| Backtest | rolling backtest since 2012 vs an equal-weight portfolio of the same universe, the profile benchmark and SPY; estimated vs realised volatility; allocation over time; side-by-side comparison of the house views |
 | Simulation | Monte Carlo (block bootstrap) of the client's wealth over 5-20 years vs the benchmark: range of outcomes, loss beyond the client's limit, worst fall, one-year VaR and expected shortfall |
 
 The "About Us" button (top right) presents the project and the team.
@@ -34,20 +34,27 @@ The "About Us" button (top right) presents the project and the team.
   optimisation, `pi = delta x Cov(asset, market)` with a 60% SPY / 40% AGG market portfolio and
   delta = 2.5, combined with a house view chosen in the client settings, with He & Litterman's
   uncertainty `Omega = diag(P tau Sigma P') (1 - c) / c` (tau = 0.05, c = confidence).
-  - **Insider trading (default).** Breadth of insider buying: among US listed companies whose
-    officers or directors traded their own shares on the open market over the last 3 months, the
-    share with purchases. Compared with its last 5 years (z-score, capped at ±2), it gives one
+  - **Insider trading (default).** Breadth of insider buying: each month, count the US listed
+    companies whose officers or directors bought their own shares on the open market, and those
+    whose insiders sold; breadth = purchases / (purchases + sales), each count added up over the
+    last 3 months (company-months: a company active in several months, or on both sides, counts each
+    time). Compared with its last 5 years (z-score, capped at ±2), it gives one
     relative view: equities (SPY) beat bonds (AGG) by the equilibrium spread + 2% × z. Default
     confidence 50%. Breadth peaked at the market lows of 2008–09, 2011 and 2020; after the fifth of
     months with the broadest buying, SPY beat the T-bill by about 20% over the next year, against
     about 12% otherwise (modest and noisy evidence, shown in the app with its limits). Insider
     purchases of single large companies showed no edge, so they are displayed but not used.
-    Backtest 2012–2026 against no view: slightly higher Sharpe in every profile (Balanced 1.09 vs
-    1.07), smaller drawdowns, realised volatility at the budget (10.1% for 10%).
+    Backtest May 2012 – Sep 2026 against no view: slightly higher Sharpe in every profile (Balanced
+    1.05 vs 1.04), about the same drawdowns, and 10.3% realised volatility over the whole backtest
+    for a 10% volatility budget. A small gain, not a proof.
   - **Past performance.** Views = each asset's 60-month average return (default confidence 10%).
-    Higher backtest Sharpe (Balanced 1.15), but more risk than promised (11.1% for a 10% budget),
-    deeper drawdowns, twice the turnover, and partly hindsight: it favours past winners in a list
-    of today's winners.
+    Higher backtest Sharpe (Balanced 1.13), but higher realised volatility over the whole backtest
+    (11.2% for a 10% volatility budget), deeper drawdowns, about twice the turnover, and partly
+    hindsight: it favours past winners in a list of today's winners.
+- **Timing.** In the backtest each rebalancing decided at a month-end trade uses data up to the
+  previous month-end only (returns, covariance, insider filings), and trades at the close of the
+  rebalancing month: a one-month implementation lag. Deciding and trading at the same close was
+  slightly flattering (Sharpe +0.01 to +0.03 in every profile).
 - **Risk:** Ledoit-Wolf covariance on standardised returns over a rolling 60-month window. An
   asset is used only once it has 60 months of history.
 - **Constraints.** Volatility cap; minimum bonds; at most 10% cash and cash equivalents; at most
@@ -95,19 +102,28 @@ network.
 - **Survivorship bias.** The stock list is today's index membership applied to the past:
   companies that failed or left the indices are missing. Backtests and simulations of the
   strategy are therefore optimistic. SPY and the profile benchmarks are not affected; the
-  equal-weight portfolio has the same bias, so the gap between it and the strategy is the fair
-  measure of what the optimisation adds.
+  equal-weight portfolio has the same bias, so comparing with it removes the bias from the
+  comparison. But that gap does not isolate the optimisation either: the equal-weight portfolio
+  also ignores the volatility budget and the bond-sleeve limits (with today's fund data its bonds
+  average 6.4 years of duration and 15% high yield, beyond what the Conservative and Balanced
+  profiles allow), so the two portfolios differ in allocation and constraints, not only in method.
 - Bond fund durations and ratings are current values applied to the whole history.
 - The volatility caps are calibrated on the full 2003–2026 history, which includes years after the
-  backtest start (2012). On the data available in January 2012 alone they would have been the same
+  backtest start (2012). On the data available at the start (to January 2012) alone they would have been the same
   (Conservative 6%, Balanced 10%) or higher (Growth 13%, Dynamic 16%, because 2003–2011 includes
   2008), so this choice does not flatter the backtest.
-- The volatility promised by the optimiser is exceeded out of sample on average (estimation
-  error): 11.1% realised for a 10% budget at the default confidence, 10.0% with the pure
-  equilibrium (0%).
-- The optimised strategy does not clearly beat the equal-weight portfolio of the same universe
-  (Balanced Sharpe 1.15 vs 1.16); a well-known result with short estimation windows (DeMiguel,
-  Garlappi and Uppal, 2009).
+- The volatility budget applies to estimated volatility at each rebalancing, not to a guaranteed
+  future maximum. Realised volatility can exceed it. For the Balanced profile, annualised
+  realised volatility over the entire backtest is 10.3% with the default insider view at 50%
+  confidence and 11.2% with the past-performance view at its 10% default confidence, for a 10%
+  budget. The app also reports the average realised volatility over the following 12 months at
+  each eligible rebalancing; those windows may overlap and are a different measure from the
+  volatility of the full backtest.
+- The optimised strategy does not beat the equal-weight portfolio of the same universe (Balanced
+  Sharpe 1.05 vs 1.14, every profile below it), a well-known result with short estimation windows
+  (DeMiguel, Garlappi and Uppal, 2009). It does beat its profile benchmark (Balanced 1.05 vs 0.84)
+  while keeping close to the volatility budget, which the equal-weight portfolio does not try to
+  respect.
 - The simulation resamples history only; its range is only as wide as the past it was built from.
 - Educational project, not investment advice.
 

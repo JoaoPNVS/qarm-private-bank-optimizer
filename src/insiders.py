@@ -5,10 +5,13 @@ market with their own money, they signal that they expect prices to rise; sales 
 (insiders sell to diversify, to pay taxes or under automatic 10b5-1 plans). Insider buying across
 ALL companies has predicted the stock market (Seyhun 1988, 1992; Lakonishok & Lee 2001).
 
-The signal: BREADTH of insider buying. Among the US listed companies whose officers or directors
-traded their own shares on the open market over the last SHARE_MONTHS months (Form 4, codes P and
-S), the share of companies with purchases. Counting companies, not dollars, stops a few huge sales
-from dominating. Breadth peaked at the market lows (Dec 2008 - Mar 2009: 60% against about 33%
+The signal: BREADTH of insider buying. Each month, count the US listed companies whose officers or
+directors bought their own shares on the open market (Form 4, code P) and those whose insiders sold
+(code S). Breadth = purchases / (purchases + sales), each count added up over the last SHARE_MONTHS
+months. The unit is the COMPANY-MONTH, not the unique company: a company active in several of the
+months, or with both purchases and sales, is counted each time (only monthly counts are stored, see
+scripts/download_insiders.py). Counting companies, not dollars, stops a few huge sales from
+dominating. Breadth peaked at the market lows (Dec 2008 - Mar 2009: 60% against about 33%
 normally; Oct 2011; May 2020). It has drifted down since 2006 as automatic sale plans spread, so it
 is compared with its own last Z_WINDOW months (z-score) rather than with a fixed level.
 
@@ -20,15 +23,18 @@ is correlated with SPY and AGG, the view moves all expected returns: when inside
 behave like equities become more attractive than assets that behave like bonds.
 
 Point in time. A Form 4 is public on its filing date, at most two business days after the trade; the
-breadth of month m uses the filings of month m, complete at its month-end. A rebalancing at t uses
-breadth up to t only (the z-score too). No view when the latest data is older than STALE_MONTHS.
+breadth of month m uses the filings of month m, complete at its month-end. In the backtest a trade
+at the close of t uses breadth up to the previous month-end t-1 only (the z-score too), like the
+rest of the data (src/backtest.py). No view when the latest data is older than STALE_MONTHS.
 
 Evidence, 2009-2026 (rolling z): after the top fifth of months by breadth, SPY beat the T-bill by
 about 20% over the next year, against about 12% after the other months (the lower four groups are
 not in order); the 12-month predictive regression has a Newey-West t-stat of about 2.2 (1.4 from
 2012). The effect is modest and noisy, and insiders tend to buy early (spring 2008). Backtest
-2012-2026 at c = 50% vs no view: Sharpe +0.01 to +0.03 in every profile, smaller drawdowns,
-realised volatility at the promised budget.
+2012-05 to 2026-09 (decisions with data to the previous month-end) at c = 50% vs no view: Sharpe
++0.01 to +0.03 in every profile (Balanced 1.05 vs 1.04), drawdowns about the same (smaller for
+Conservative, slightly deeper for Growth and Dynamic), realised volatility close to the
+volatility budget (Balanced 10.3% over the whole backtest).
 
 Stock-level purchases are NOT used as views: in our 150 large companies, stocks bought by their
 insiders did no better than the same month's universe or sector average over the next 3-12 months
@@ -69,8 +75,10 @@ class InsiderView:
 
 
 def market_signal(market: pd.DataFrame) -> pd.DataFrame:
-    """Monthly breadth of insider buying and its z-score against its own last Z_WINDOW months. Point in
-    time: the values of month m use months up to m only."""
+    """Monthly breadth of insider buying and its z-score against its own last Z_WINDOW months.
+    Breadth = buying company-months / (buying + selling company-months) over the last SHARE_MONTHS
+    months: the monthly counts of companies are added up, so a company can count once per month and on
+    both sides. Point in time: the values of month m use months up to m only."""
     m = market.asfreq("ME", fill_value=0)
     buys = m["buy_companies"].rolling(SHARE_MONTHS).sum()
     sells = m["sell_companies"].rolling(SHARE_MONTHS).sum()
