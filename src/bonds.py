@@ -13,7 +13,7 @@ RATING_NOTCH = {"AAA": 1, "AA+": 2, "AA": 3, "AA-": 4, "A+": 5, "A": 6, "A-": 7,
                 "BB+": 11, "BB": 12, "BB-": 13, "B+": 14, "B": 15, "B-": 16, "CCC+": 17, "CCC": 18, "CCC-": 19,
                 "CC": 20, "C": 21, "D": 22}
 NOTCH_RATING = {v: k for k, v in RATING_NOTCH.items()}
-MATURITY_ORDER = ["Ultra-short", "Short", "Intermediate", "Long"]
+MATURITY_ORDER = ["Short", "Intermediate", "Long"]  # the ultra-short funds (BIL, FLOT) count as cash
 DUST = 1e-4            # solver residuals below 0.01% of the portfolio are ignored
 MIN_SLEEVE = 1e-3      # a bond sleeve below 0.1% of the portfolio is reported as "no bonds"
 
@@ -39,7 +39,7 @@ def sleeve_summary(weights: pd.Series, universe: pd.DataFrame) -> dict:
     score = float((rel * u["rating_score"]).sum())
     funds = pd.DataFrame({"Segment": u["bond_type"], "Issuer": u["issuer_type"], "Maturity": u["maturity_bucket"],
                           "Duration": u["duration"], "Rating": u["avg_rating"], "Quality": u["credit_quality"],
-                          "Weight": wb, "Share of bonds": rel}).sort_values("Weight", ascending=False)
+                          "Weight": wb, "Share of bonds": rel}).sort_values("Weight", ascending=False).rename_axis("Fund")
     return {"share": total,
             "duration": float((rel * u["duration"]).sum()),
             "rating_score": score, "avg_rating": rating_from_score(score),

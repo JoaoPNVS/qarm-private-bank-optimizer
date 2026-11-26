@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import logging
 import os
 from contextlib import contextmanager
@@ -263,7 +264,13 @@ except data.DataError as exc:
     st.error(f"Market data unavailable: {exc}")
     st.stop()
 
-names = universe["name"].to_dict()
+def display_name(name: str) -> str:
+    """Index-list names read naturally: 'Home Depot (The)' -> 'The Home Depot', 'Lilly (Eli)' -> 'Eli Lilly'."""
+    m = re.fullmatch(r"(.+?) \((The|Eli)\)", name)
+    return f"{m.group(2)} {m.group(1)}" if m else name
+
+
+names = {t: display_name(n) for t, n in universe["name"].items()}
 label = lambda t: f"{names.get(t, t)} ({t})"  # noqa: E731
 
 answers = {q.key: st.session_state.get(f"q.{q.key}", 1) for q in prof.QUESTIONS}
@@ -632,12 +639,12 @@ with tabs[1], guarded("Client Profile"):
             st.markdown(f"## {a.profile}")
             st.caption(sp.description)
             c1, c2, c3 = st.columns(3)
-            c1.metric("Capacity (1-4)", f"{a.dimensions['capacity']:.2f}", a.levels["capacity"], delta_color="off")
+            c1.metric("Capacity (1-4)", f"{a.dimensions['capacity']:.2f}", a.levels["capacity"], delta_color="off", delta_arrow="off")
             c2.metric("Willingness (1-4)", f"{a.dimensions['willingness']:.2f}", a.levels["willingness"],
-                      delta_color="off")
+                      delta_color="off", delta_arrow="off")
             k_cap = prof.KNOWLEDGE_CAP.get(round(a.dimensions["knowledge"]))
             c3.metric("Knowledge (1-4)", f"{a.dimensions['knowledge']:.2f}",
-                      f"at most {k_cap}" if k_cap else "no limit", delta_color="off",
+                      f"at most {k_cap}" if k_cap else "no limit", delta_color="off", delta_arrow="off",
                       help="One question, so a whole score. It does not set a level: it caps the profile "
                            "(no knowledge: at most Balanced; basic: at most Growth).")
             st.markdown("**Why this profile**")
@@ -827,11 +834,14 @@ with tabs[2], guarded("Portfolio"):
                 g.update_layout(title="Allocation along the frontier", xaxis_title="Estimated volatility (% p.a.)",
                                 yaxis_title="% of portfolio", yaxis_range=[0, 100])
                 f2.plotly_chart(fig_layout(g, 430), width="stretch")
+                cost_text = (f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
+                             "year: that is what diversification limits, the bond floor and the other rules cost on these "
+                             "estimates, in exchange for a sturdier portfolio." if cost_bps >= 1 else
+                             "dropping all client constraints would add almost nothing (less than 1 bp a year): on these "
+                             "estimates the client's rules cost practically no expected return.")
                 st.caption(f"Each point of the curves is the portfolio with the highest expected return for that level of "
                            f"risk. The recommended portfolio (star) is the point at the volatility budget. At this risk, "
-                           f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
-                           "year: that is what diversification limits, the bond floor and the other rules cost on these "
-                           "estimates, in exchange for a sturdier portfolio. Both curves are almost straight lines, and "
+                           f"{cost_text} Both curves are almost straight lines, and "
                            "the benchmark and SPY sit on them: our expected returns start from the market equilibrium, "
                            "in which a SPY / AGG mix is efficient by construction, so on these estimates no portfolio "
                            "of the universe beats its Sharpe ratio. The house view only tilts the mix between equities "
@@ -944,7 +954,8 @@ with tabs[2], guarded("Portfolio"):
                              width="stretch")
                 st.caption("Duration and ratings are the funds' current fact-sheet values (iShares, State Street, "
                            "Vanguard, Sept./Oct. 2026), applied to the whole history. Maturity buckets use the average "
-                           "maturity: <1y ultra-short, 1-5y short, 5-10y intermediate, 10y+ long.")
+                           "maturity: 1-5y short, 5-10y intermediate, 10y+ long. The ultra-short funds (BIL, FLOT) "
+                           "count as cash equivalents, not bonds.")
 
         with sub_holdings:
             held = w[w > 0.005].sort_values()
@@ -989,13 +1000,13 @@ with home_live, guarded("Home"), st.container(key="home-stats"):
     st.markdown('<div class="home-section">Today at a glance</div>', unsafe_allow_html=True)
     cap = cons_spec["max_volatility"]["params"]["limit"]
     c = [col.container(border=True) for col in st.columns(4, gap="medium")]
-    c[0].metric("Risk profile", profile, f"volatility budget {cap:.0%}", delta_color="off",
+    c[0].metric("Risk profile", profile, f"volatility budget {cap:.0%}", delta_color="off", delta_arrow="off",
                 help="From the questionnaire (Client Profile tab), unless overridden in the client settings.")
     if res.ok:
         c[1].metric("Expected return p.a. above T-bill", pct(res.expected_return, 1),
                     help="Recommended portfolio, ex ante. The Portfolio tab compares it with the benchmark "
                          f"({bench_label(profile)}) and SPY.")
-        c[2].metric("Estimated volatility p.a.", pct(res.volatility, 1), f"budget {cap:.0%}", delta_color="off",
+        c[2].metric("Estimated volatility p.a.", pct(res.volatility, 1), f"budget {cap:.0%}", delta_color="off", delta_arrow="off",
                     help="Estimated before investing; the optimiser uses the whole budget when it raises the expected "
                          "return. Realised volatility may be higher (see the Backtest tab).")
     else:
@@ -1008,7 +1019,7 @@ with home_live, guarded("Home"), st.container(key="home-stats"):
         mood = "Above normal" if z > 0.5 else "Below normal" if z < -0.5 else "Normal"
         effect = ("not used" if view_source != INSIDER
                   else "leans to equities" if z > 0.5 else "leans to bonds" if z < -0.5 else "no tilt")
-        c[3].metric("Insider signal", mood, effect, delta_color="off",
+        c[3].metric("Insider signal", mood, effect, delta_color="off", delta_arrow="off",
                     help=f"Insider buying breadth {share:.0%} in the 3 months to {month:%B %Y}, {z:+.1f} standard "
                          "deviations against its last 5 years. Details in the Insider Signal tab.")
     if res.ok:
@@ -1139,16 +1150,17 @@ with tabs[3], guarded("Insider Signal"):
                                & (insider_trades["filing_date"] > last - pd.DateOffset(months=ins.RECENT_MONTHS))]
         st.markdown(f"In the {ins.RECENT_MONTHS} months to {last:%B %Y}: **{len(recent)} purchases** "
                     f"(at least {usd_short(ins.MIN_PURCHASE_USD)}) in {recent['ticker'].nunique()} of our companies, "
-                    f"against **{len(sales):,} sales** in {sales['ticker'].nunique()} companies.")
+                    f"against **{len(sales):,} sales** (of any size) in {sales['ticker'].nunique()} companies.")
         if len(recent):
             show = recent.assign(Company=[label(t) for t in recent["ticker"]])[
-                ["filing_date", "Company", "insider", "role", "value_usd"]].rename(columns={
+                ["filing_date", "Company", "insider", "role", "value_usd"]].assign(
+                    insider=lambda x: [n.title() if n.isupper() else n for n in x["insider"]]).rename(columns={
                     "filing_date": "Filed", "insider": "Insider", "role": "Role", "value_usd": "Amount (USD)"})
             st.dataframe(show.style.format({"Filed": lambda d: f"{d:%d %b %Y}", "Amount (USD)": lambda x: usd(x)}),
                          hide_index=True, width="stretch", height=min(400, 38 + 35 * len(show)))
         study = ins.purchase_event_study(insider_trades, returns, universe)
         s1, s2 = st.columns([2, 3], gap="large")
-        s1.dataframe(study.rename(columns={"vs_universe": "vs our stocks", "t_universe": "t-stat",
+        s1.dataframe(study.rename_axis("Horizon").rename(columns={"vs_universe": "vs our stocks", "t_universe": "t-stat",
                                            "vs_sector": "vs same sector", "t_sector": "t-stat ", "events": "Events"})
                      .style.format({"vs our stocks": "{:+.2%}", "vs same sector": "{:+.2%}", "t-stat": "{:.1f}",
                                     "t-stat ": "{:.1f}"}), width="stretch")
