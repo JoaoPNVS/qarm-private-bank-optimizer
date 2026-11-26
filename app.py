@@ -831,15 +831,17 @@ with tabs[2], guarded("Portfolio"):
                            f"risk. The recommended portfolio (star) is the point at the volatility budget. At this risk, "
                            f"dropping all client constraints would add about {cost_bps:.0f} bps of expected return per "
                            "year: that is what diversification limits, the bond floor and the other rules cost on these "
-                           "estimates, in exchange for a sturdier portfolio. Without constraints the curve starts at cash "
-                           "(zero risk) and is almost a straight line: mixing cash with the best risky portfolio, as on "
-                           "the capital market line. The benchmark and SPY sit below the curve: "
-                           "for the same estimated risk, an optimised mix of the universe expects more (before "
-                           "estimation error; see the Backtest tab).")
+                           "estimates, in exchange for a sturdier portfolio. Both curves are almost straight lines, and "
+                           "the benchmark and SPY sit on them: our expected returns start from the market equilibrium, "
+                           "in which a SPY / AGG mix is efficient by construction, so on these estimates no portfolio "
+                           "of the universe beats its Sharpe ratio. The house view only tilts the mix between equities "
+                           "and bonds; the Backtest tab shows what the strategy actually delivered.")
                 gap = res.volatility - tangency["volatility"]
-                if abs(gap) < 0.002 or tangency["sharpe"] - res.sharpe < 0.005:
-                    where = (f"Your portfolio is practically the maximum-Sharpe portfolio (Sharpe ratio {res.sharpe:.2f}): "
-                             "at this volatility budget, no constrained mix offers a better trade-off.")
+                if abs(gap) < 0.002:
+                    where = (f"Your portfolio is practically the maximum-Sharpe portfolio (Sharpe ratio {res.sharpe:.2f}).")
+                elif tangency["sharpe"] - res.sharpe < 0.005:
+                    where = (f"Your portfolio has practically the same Sharpe ratio ({res.sharpe:.2f}): the curve is almost "
+                             "straight, so more or less risk changes the expected return but hardly the trade-off.")
                 elif gap > 0:
                     where = (f"Your portfolio sits to its right (Sharpe ratio {res.sharpe:.2f}): the extra expected return "
                              "is bought with proportionally more risk, the price of a higher return target without borrowing.")
@@ -1121,7 +1123,7 @@ with tabs[3], guarded("Insider Signal"):
                 "μ = π + τΣP′(PτΣP′ + Ω)⁻¹(Q − Pπ), with P = (+1 SPY, −1 AGG), τ = "
                 f"{est.BL_TAU}, Ω = PτΣP′(1 − c)/c and c the confidence. For this single view, c is exactly its "
                 "weight against the equilibrium. Every asset moves according to its covariance with SPY minus AGG: "
-                "equity-like assets gain the most. In the backtest, each rebalancing only uses filings published "
+                "equity-like assets move the most, up when insiders buy more than usual and down when they buy less. In the backtest, each rebalancing only uses filings published "
                 "by the end of the previous month.")
             if len(view.table):
                 st.dataframe(view.table.rename(columns={"view": "View", "equilibrium": "Equilibrium",
