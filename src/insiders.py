@@ -27,10 +27,11 @@ breadth of month m uses the filings of month m, complete at its month-end. In th
 at the close of t uses breadth up to the previous month-end t-1 only (the z-score too), like the
 rest of the data (src/backtest.py). No view when the latest data is older than STALE_MONTHS.
 
-Evidence, 2009-2026 (rolling z): after the top fifth of months by breadth, SPY beat the T-bill by
-about 20% over the next year, against about 12% after the other months (the lower four groups are
-not in order); the 12-month predictive regression has a Newey-West t-stat of about 2.2 (1.4 from
-2012). The effect is modest and noisy, and insiders tend to buy early (spring 2008). Backtest
+Evidence, 2009-2026 (rolling z), on what the view predicts, SPY minus AGG: after the top fifth of
+months by breadth, SPY beat AGG by about 18% over the next year, against about 11% after the other
+months (the lower four groups are not in order); the 12-month predictive regression has a
+Newey-West t-stat of about 2.2 (1.3 from 2012). Same picture for SPY minus the T-bill (about 20% vs
+12%). In-sample and overlapping the backtest: a hypothesis, not an independent test. The effect is modest and noisy, and insiders tend to buy early (spring 2008). Backtest
 2012-05 to 2026-09 (decisions with data to the previous month-end) at c = 50% vs no view: Sharpe
 +0.01 to +0.03 in every profile (Balanced 1.05 vs 1.04), drawdowns about the same (smaller for
 Conservative, slightly deeper for Growth and Dynamic), realised volatility close to the
@@ -145,10 +146,11 @@ def recent_purchases(trades: pd.DataFrame, date: pd.Timestamp, months: int = REC
     return b.sort_values("filing_date", ascending=False).reset_index(drop=True)
 
 
-def market_evidence(signal: pd.DataFrame, spy_excess: pd.Series, horizon: int = 12) -> pd.DataFrame:
-    """Average SPY excess return over the next `horizon` months by quintile of the breadth z-score
-    (whole history: an in-sample description, not a backtest)."""
-    fwd = forward_return(spy_excess, horizon)
+def market_evidence(signal: pd.DataFrame, spread: pd.Series, horizon: int = 12) -> pd.DataFrame:
+    """Average of `spread` (e.g. SPY minus AGG, the view's comparison) compounded over the next
+    `horizon` months, by quintile of the breadth z-score (whole history: an in-sample description,
+    not a backtest)."""
+    fwd = forward_return(spread, horizon)
     d = pd.concat([signal["z"].rename("z"), fwd.rename("fwd")], axis=1).dropna()
     if len(d) < 25:
         return pd.DataFrame(columns=["z_range", "next_return", "months"])
