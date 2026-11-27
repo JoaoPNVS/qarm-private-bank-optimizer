@@ -565,8 +565,8 @@ with tabs[0], guarded("Home"):
         '<div class="home-welcome">Welcome to the</div>'
         '<div class="home-title">Private Client Portfolio Optimizer</div>'
         '<div class="home-sub">From seven questions, we build the portfolio with the highest expected return while '
-        "keeping its estimated volatility within your budget. On top of that, we follow our house view, which looks "
-        "at what company insiders do with their own money.</div>"
+        "keeping its estimated volatility within your budget. On top of that, we follow our house view, which is "
+        "based on whether company insiders are buying their own shares.</div>"
         f'<div class="home-chips">{chips}</div>'
         '<div class="home-scroll">Scroll down for our latest view and the five steps<b>↓</b></div>'
         "</div>", unsafe_allow_html=True)
@@ -1043,7 +1043,7 @@ with home_live, guarded("Home"), st.container(key="home-stats"):
 
 with tabs[3], guarded("Insider Signal"):
     page_header()
-    st.subheader("House view: what company insiders do with their own money")
+    st.subheader("Our house view: insider buying")
     if signal is None:
         st.info(("The insider data is not available, so the portfolio uses the market equilibrium returns with no "
                  f"view. ({insider_error})"))
@@ -1052,9 +1052,9 @@ with tabs[3], guarded("Insider Signal"):
             ("Every officer and director of a US listed company has to report trades in their own company's "
              "shares to the SEC within two business days, on **Form 4**. We went through all of these filings "
              f"since 2006, about {insider_meta['insider_filings'] / 1000000.0:.1f} million of them, and count how "
-             "many companies' insiders are buying on the open market rather than selling. As Peter Lynch "
-             "famously said, insiders might sell their shares for any number of reasons, but they buy them "
-             "for only one, because they think the price will rise. When buying spreads across companies, we "
+             "many companies' insiders are buying on the open market rather than selling. Sales are often "
+             "routine (taxes, diversification, automatic sale plans), so we focus on purchases, which usually "
+             "mean the insider expects the price to rise. When buying spreads across companies, we "
              "expect equities to beat bonds by more than usual, so we move the portfolio towards equities, "
              "always within the client's volatility budget."))
         conf_ins = confidence
@@ -1106,7 +1106,8 @@ with tabs[3], guarded("Insider Signal"):
             go.Scatter(x=avg5.index, y=avg5 * 100, name="Its 5-year average", line=dict(color=NAVY, width=1, dash="dot")),
             go.Scatter(x=spy_growth.index, y=spy_growth, name="SPY, growth of 1 USD (right axis)", yaxis="y2",
                        line=dict(color=ACCENT, width=1.5))])
-        f.update_layout(title="Insiders buy when markets are low", yaxis_title="% buying (company-months)",
+        f.update_layout(title="Share of companies with insider buying, compared with SPY",
+                        yaxis_title="% buying (company-months)",
                         yaxis2=dict(overlaying="y", side="right", type="log", showgrid=False, title="SPY (log)",
                                     tickvals=[1, 2, 4, 8], ticktext=["1", "2", "4", "8"]))
         st.plotly_chart(fig_layout(f, 420), width="stretch")
@@ -1133,7 +1134,7 @@ with tabs[3], guarded("Insider Signal"):
                 (f"We split the months into five equal groups by the insider signal ({int(evid['months'].sum())} "
                  f"months since {signal['z'].first_valid_index():%Y} with a known next year). After the fifth of "
                  f"months with the most insider buying, equities (SPY) beat bonds (AGG) by **{top_ret:.0%}** over the "
-                 f"next year on average, against **{rest_ret:.0%}** after the other months, which is exactly the "
+                 f"next year on average, against **{rest_ret:.0%}** after the other months, which is the "
                  "comparison our view makes. The effect is small and noisy, though. The four other groups are not "
                  "in order, and a 12-month regression only gives a Newey-West t-statistic of about 2.3 (about 1.4 "
                  "from 2012). These years also overlap the backtest, so this is not an independent test and we "

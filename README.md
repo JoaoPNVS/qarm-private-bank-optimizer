@@ -4,8 +4,8 @@ A Streamlit web app built for the course *Quantitative Asset and Risk Management
 HEC Lausanne. We play the role of an **international private bank** advising clients whose
 reference currency is the **US dollar**: the app profiles the client, builds the portfolio with
 the highest expected return within the client's volatility budget and constraints, backtests the
-strategy and simulates the client's future wealth. Its house view follows **what company insiders
-do with their own money**: the breadth of insider buying across all US listed companies (SEC
+strategy and simulates the client's future wealth. Its house view is based on **insider buying**:
+the share of US listed companies whose officers and directors are buying their own shares (SEC
 Form 4 filings since 2006) tilts the portfolio between equities and bonds.
 
 **Live app: <https://hec-portfolio-optimizer.streamlit.app/>** (data up to September 2026).
