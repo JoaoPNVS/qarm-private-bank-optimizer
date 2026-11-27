@@ -240,10 +240,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
 
 ## App (`app.py`, light "mist" UI: six tabs in a floating bottom navigation, no sidebar)
 0. **Home** (opens first, no page header) — a deep-blue ribbon "Welcome to the Private Client Portfolio
-   Optimizer" (what we do, the insider house view, four highlights), "Today at a glance"
-   (risk profile and volatility budget, expected return and volatility of the recommended portfolio,
-   insider signal; written into a container created at the top, filled once the portfolio is
-   computed) and the five steps of the app, one card per tab.
+   Optimizer" (what we do, the insider house view, four highlights), "Our view today"
+   (insider signal and breadth, investment universe, data date: only what is true before the client answers;
+   the client's profile and portfolio figures come after the questionnaire) and the five steps of the app, one card per tab.
 1. **Client Profile** — "Client settings" box (wealth, profile override, confidence in the insider
    house view; these inputs drive every tab), the questionnaire as an accordion, and the resulting
    profile with the reasons.

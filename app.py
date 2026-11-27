@@ -565,9 +565,9 @@ with tabs[0], guarded("Home"):
         "keeps its estimated volatility within your budget, tilted by our house view: what company insiders do with their own "
         "money.</div>"
         f'<div class="home-chips">{chips}</div>'
-        '<div class="home-scroll">Scroll down for today\'s portfolio and the five steps<b>↓</b></div>'
+        '<div class="home-scroll">Scroll down for our view today and the five steps<b>↓</b></div>'
         "</div>", unsafe_allow_html=True)
-    home_live = st.container()   # "Today at a glance": filled once the portfolio is computed (see below)
+    home_live = st.container()   # "Our view today": filled further down, once the data and the signal are loaded
     steps = "".join(
         f'<div class="home-step"><div class="num">{num}</div><div class="name">{html.escape(tab)}</div>'
         f'<div class="text">{html.escape(text)}</div></div>' for num, tab, text in HOME_STEPS)
@@ -997,35 +997,34 @@ with tabs[2], guarded("Portfolio"):
 # --- Home: live figures (written into the Home tab now that the portfolio is known) -----------
 
 with home_live, guarded("Home"), st.container(key="home-stats"):
-    st.markdown('<div class="home-section">Today at a glance</div>', unsafe_allow_html=True)
-    cap = cons_spec["max_volatility"]["params"]["limit"]
+    # Only what is true before we know the client: the house view and the data. The client's own figures
+    # (profile, expected return, volatility, mix) come after the questionnaire, in the Portfolio tab.
+    st.markdown('<div class="home-section">Our view today</div>', unsafe_allow_html=True)
     c = [col.container(border=True) for col in st.columns(4, gap="medium")]
-    c[0].metric("Risk profile", profile, f"volatility budget {cap:.0%}", delta_color="off", delta_arrow="off",
-                help="From the questionnaire (Client Profile tab), unless overridden in the client settings.")
-    if res.ok:
-        c[1].metric("Expected return p.a. above T-bill", pct(res.expected_return, 1),
-                    help="Recommended portfolio, ex ante. The Portfolio tab compares it with the benchmark "
-                         f"({bench_label(profile)}) and SPY.")
-        c[2].metric("Estimated volatility p.a.", pct(res.volatility, 1), f"budget {cap:.0%}", delta_color="off", delta_arrow="off",
-                    help="Estimated before investing; the optimiser uses the whole budget when it raises the expected "
-                         "return. Realised volatility may be higher (see the Backtest tab).")
-    else:
-        c[1].metric("Recommended portfolio", "Not feasible", delta_color="off",
-                    help="The current constraints cannot all be met: see the Portfolio tab.")
     month, share, z = ins.signal_at(signal, returns.index[-1]) if signal is not None else (None, None, None)
     if z is None:
-        c[3].metric("Insider signal", "Not available", delta_color="off")
+        c[0].metric("Insider signal", "Not available", delta_color="off")
     else:
         mood = "Above normal" if z > 0.5 else "Below normal" if z < -0.5 else "Normal"
-        effect = ("not used" if view_source != INSIDER
-                  else "leans to equities" if z > 0.5 else "leans to bonds" if z < -0.5 else "no tilt")
-        c[3].metric("Insider signal", mood, effect, delta_color="off", delta_arrow="off",
-                    help=f"Insider buying breadth {share:.0%} in the 3 months to {month:%B %Y}, {z:+.1f} standard "
-                         "deviations against its last 5 years. Details in the Insider Signal tab.")
-    if res.ok:
-        mix = res.weights.groupby(universe.loc[res.weights.index, "asset_class"]).sum().reindex(CLASS_ORDER).fillna(0)
-        st.caption("Recommended mix: " + ", ".join(f"{CLASS_LABELS[k].lower()} {v:.0%}" for k, v in mix.items() if v >= 0.005)
-                   + f" (for a {usd_short(wealth)} portfolio).")
+        effect = "leans to equities" if z > 0.5 else "leans to bonds" if z < -0.5 else "no tilt"
+        c[0].metric("Insider signal", mood, effect, delta_color="off", delta_arrow="off",
+                    help=f"{z:+.1f} standard deviations against its last 5 years. Above normal tilts portfolios "
+                         "toward equities, below normal toward bonds. Details in the Insider Signal tab.")
+        hist = signal["buy_share"].loc[:month].tail(ins.Z_WINDOW)
+        c[1].metric("Insider buying breadth", f"{share:.0%}", f"5-year average {hist.mean():.0%}",
+                    delta_color="off", delta_arrow="off",
+                    help=f"3 months to {month:%B %Y}: companies whose officers or directors bought their own shares, "
+                         "divided by those that bought or sold (company-months, all US listed companies).")
+    n = universe["asset_class"].value_counts()
+    c[2].metric("Investment universe", f"{len(universe)} assets",
+                f"{n.get('Equity', 0)} equity, {n.get('Bond', 0)} bond funds", delta_color="off", delta_arrow="off",
+                help="150 large US stocks, equity funds for Europe, Japan and emerging markets, 13 bond funds, gold, "
+                     "and cash and cash equivalents, all in US dollars.")
+    c[3].metric("Market data up to", f"{returns.index[-1]:%b %Y}", f"since {returns.index[0]:%Y}",
+                delta_color="off", delta_arrow="off",
+                help="Monthly total returns in USD (yfinance); insider trades from the SEC's Form 4 filings.")
+    st.caption("Your risk profile, the recommended portfolio and its figures follow from the questionnaire in the "
+               "Client Profile tab.")
 
 # --- Insider Signal --------------------------------------------------------------------------
 
