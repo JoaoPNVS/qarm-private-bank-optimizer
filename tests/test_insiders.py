@@ -143,7 +143,10 @@ def test_backtest_views_use_only_past_filings(market, signal):
 
 def test_evidence_tables(signal, trades):
     bench = data.load_benchmark_returns()
-    q = ins.market_evidence(signal, (bench["SPY"] - bench["AGG"]).dropna())
+    q = ins.market_evidence(signal, bench["SPY"].dropna(), bench["AGG"])
+    fwd = ins.forward_return(bench["SPY"], 12) - ins.forward_return(bench["AGG"], 12)   # subtract after compounding
+    top = signal["z"].reindex(fwd.dropna().index).dropna()
+    assert abs(q["next_return"].mean() - fwd.reindex(top.index).groupby(pd.qcut(top, 5), observed=True).mean().mean()) < 1e-12
     assert len(q) == 5 and q["months"].sum() > 150
     assert q["next_return"].iloc[-1] > q["next_return"].iloc[:-1].max()   # broadest buying: best next year
     ev = ins.purchase_event_study(trades, data.load_returns(), data.load_universe())

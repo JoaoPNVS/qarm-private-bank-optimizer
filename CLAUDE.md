@@ -150,9 +150,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
   single view, c is exactly its weight against the equilibrium). Point in time: filings dated up to
   the end of the estimation window (in the backtest the month before the trade); no view if the data is older than 6 months. Evidence: breadth peaked at the
   market lows (Dec 2008 - Mar 2009, Oct 2011, May 2020); shown on SPY MINUS AGG (what the view
-  predicts): after the top fifth of months by breadth, SPY beat AGG by ~18% over the next year vs ~11%
-  after the other months (SPY vs T-bill: ~20% vs ~12%); 12-month predictive regression Newey-West
-  t ~2.2 (1.3 from 2012). In-sample, overlapping the backtest: presented as a hypothesis, not proof.
+  predicts; each 12-month return compounded, then subtracted): after the top fifth of months by breadth,
+  SPY beat AGG by ~18% over the next year vs ~11% after the other months (SPY vs T-bill: ~20% vs ~13%);
+  12-month predictive regression Newey-West t ~2.3 (1.4 from 2012). In-sample, overlapping the backtest: presented as a hypothesis, not proof.
   **Stock-level purchases are NOT used as views:** in our 150 large companies, stocks bought by
   their insiders did no better than the same month's universe or sector average over 3-12 months
   (`purchase_event_study`, t-stats around 0); shown in the app as information only. Backtest
