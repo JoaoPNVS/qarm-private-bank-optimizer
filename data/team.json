@@ -25,14 +25,14 @@
     {
       "name": "Ruben Correia Pinto",
       "role": "Fixed Income",
-      "description": "Designs the bond sleeve: segments, duration, credit quality and limits.",
+      "description": "Designs the bond portfolio and its duration and credit quality limits.",
       "photo": "assets/team/ruben.jpg",
       "linkedin": ""
     },
     {
       "name": "Dimitri Prouvost",
       "role": "Risk Simulation & Interface Design",
-      "description": "Measures portfolio risk, simulates the client's future wealth, and designed the app's blue interface with its floating navigation.",
+      "description": "Simulates the client's wealth, measures risk and designed the interface.",
       "photo": "assets/team/dimitri.jpg",
       "linkedin": ""
     }
