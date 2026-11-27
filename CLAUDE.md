@@ -149,9 +149,10 @@ Grading criteria (from the professor) — every feature should serve one of thes
   E[SPY] - E[AGG] = equilibrium spread + 2% x z. Confidence c: slider 0-90%, default 50% (for a
   single view, c is exactly its weight against the equilibrium). Point in time: filings dated up to
   the end of the estimation window (in the backtest the month before the trade); no view if the data is older than 6 months. Evidence: breadth peaked at the
-  market lows (Dec 2008 - Mar 2009, Oct 2011, May 2020); after the top fifth of months by breadth,
-  SPY beat the T-bill by ~20% over the next year vs ~12% after the other months; 12-month
-  predictive regression Newey-West t ~2.2 (modest, noisy; insiders also bought early in 2008).
+  market lows (Dec 2008 - Mar 2009, Oct 2011, May 2020); shown on SPY MINUS AGG (what the view
+  predicts): after the top fifth of months by breadth, SPY beat AGG by ~18% over the next year vs ~11%
+  after the other months (SPY vs T-bill: ~20% vs ~12%); 12-month predictive regression Newey-West
+  t ~2.2 (1.3 from 2012). In-sample, overlapping the backtest: presented as a hypothesis, not proof.
   **Stock-level purchases are NOT used as views:** in our 150 large companies, stocks bought by
   their insiders did no better than the same month's universe or sector average over 3-12 months
   (`purchase_event_study`, t-stats around 0); shown in the app as information only. Backtest
@@ -193,6 +194,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
   tiered by volume because ETF liquidity comes from the underlying (VGK: $0.26bn a day, 1-2 bp
   spread); cash 0. The optimiser penalises sum_i c_i |w_i - w_prev_i| and the backtest charges
   the same costs. Run `build_universe.py` before `download_data.py` (the build rewrites the CSV).
+  Today's recommendation starts from cash (no w_prev): its expected return is BEFORE the one-off cost
+  of buying it (shown in the Overview caption). Limitation: the tiers use 2025-26 liquidity applied to
+  the past; with every stock at 10 bps the backtest Sharpe falls by 0.04-0.06 (Balanced 1.01).
 - **Backtest** (`src/backtest.py`): **timing = one-month implementation lag**: the decision traded at
   the close of month t uses data up to t-1 only (estimation window, eligibility, insider filings;
   `information_date`), so nothing assumes the month-end close is known before trading at it
@@ -214,7 +218,8 @@ Grading criteria (from the professor) — every feature should serve one of thes
   Conservative 0.91 vs 0.86 / 0.64, Balanced 1.05 vs 1.14 / 0.84, Growth 1.07 vs 1.22 / 0.89, Dynamic
   1.13 vs 1.26 / 0.92 (above equal weight only for Conservative, above the benchmark in every profile). Shown in every backtest table and chart, with a plain-language "How to read these
   results" box for the client.
-- **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
+- **Simulation** (`src/risk.py`; labelled "Our strategy, 2012–2026 replayed", with a box above the
+  amounts saying they replay a strong period and are not the ex-ante expected return): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
   fixed seed) of the client's wealth over 5-20 years, starting from the client wealth. History =
   the strategy's OUT-OF-SAMPLE backtest returns (2012-2026: each quarter's portfolio chosen with
   the previous 60 months only, trading costs deducted) and the profile benchmark on the SAME
@@ -237,11 +242,11 @@ Grading criteria (from the professor) — every feature should serve one of thes
 - **Special frontier points** (`src/frontier.py`): minimum-variance portfolio (left end of the
   constrained curve) and maximum-Sharpe (tangency) portfolio under the client's constraints, found
   by golden-section search on the volatility cap (the Sharpe ratio along a concave frontier has one
-  peak); capital market line from the T-bill (origin, returns are in excess) through it.
+  peak); capital market line from the T-bill (origin, returns are in excess) through it, labelled "theoretical allocation line" in the app (its points mix with cash or leverage and can break the client's rules).
 
 ## App (`app.py`, light "mist" UI: six tabs in a floating bottom navigation, no sidebar)
 0. **Home** (opens first, no page header) — a deep-blue ribbon "Welcome to the Private Client Portfolio
-   Optimizer" (what we do, the insider house view, four highlights), "Our view today"
+   Optimizer" (what we do, the insider house view, four highlights), "Latest available view (data to <month>)"
    (insider signal and breadth, investment universe, data date: only what is true before the client answers;
    the client's profile and portfolio figures come after the questionnaire) and the five steps of the app, one card per tab.
 1. **Client Profile** — "Client settings" box (wealth, profile override, confidence in the insider

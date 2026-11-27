@@ -253,7 +253,7 @@ def test_simulation_tab():
     assert "Median wealth in 10 years" in labels and "Chance of a loss above 10% in a year" in labels
     assert "Worst fall within 10 years (typical)" in labels
     sim = sim_table(at)
-    assert list(sim.index) == ["Recommended portfolio", "Benchmark (60% SPY / 40% AGG)"]
+    assert list(sim.index) == ["Our strategy, 2012–2026 replayed", "Benchmark (60% SPY / 40% AGG)"]
     assert (sim["Pessimistic (5%)"] < sim["Median"]).all() and (sim["Median"] < sim["Optimistic (95%)"]).all()
     assert sim["Loss above 10% in a given year"].between(0, 1).all()
     assert (sim["Worst fall, bad case (5%)"] <= sim["Worst fall, typical"]).all() and (sim["Worst fall, typical"] < 0).all()
@@ -294,13 +294,13 @@ def open_about(at):
     return at.run(timeout=TIMEOUT)
 
 
-def test_about_us_without_photos():
+def test_about_us_with_team_photos():
     at = open_about(run_app())
     assert not at.exception and not at.error
     cards = about_names(at)
     assert len(cards) == 5 and any("Joao Neves" in c for c in cards)
-    avatars = [md.value for md in at.markdown if "border-radius:50%" in md.value]
-    assert len(avatars) == 5 and all("<div" in a for a in avatars)  # initials avatars, no broken image
+    initials = [md.value for md in at.markdown if "border-radius:50%" in md.value and "<img" not in md.value]
+    assert not initials                       # every member's photo is in assets/team/, so no initials avatar
 
 
 def test_about_us_with_a_photo(tmp_path, monkeypatch):
@@ -330,7 +330,7 @@ def test_efficient_frontier_section():
     at = run_app()
     assert not at.exception and not at.error
     assert any(md.value == "### Efficient frontier" for md in at.markdown)
-    assert any("capital market line" in c.value for c in at.caption)
+    assert any("theoretical allocation line" in c.value for c in at.caption)
     assert any("maximum-Sharpe (tangency) portfolio" in c.value for c in at.caption)
     at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views_insider"): 0})
     assert not at.exception and not at.error

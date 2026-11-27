@@ -218,7 +218,8 @@ def simulate(profile: str, cons_json: str, freq: str, source: str, confidence: f
     hist = series[["Strategy", bench_label(profile)]].dropna()
     hist.columns = ["Portfolio", "Benchmark"]
     sim = risk.wealth_simulation(hist, wealth, years, year_loss_limit=loss_limit)
-    return sim, hist.index[0], hist.index[-1], len(hist)
+    hist_return = float((1 + hist["Portfolio"]).prod() ** (12 / len(hist)) - 1)   # what the replayed history earned
+    return sim, hist.index[0], hist.index[-1], len(hist), hist_return
 
 
 def pct_slider(label, default, lo, hi, step, key, disabled=False):
@@ -565,9 +566,9 @@ with tabs[0], guarded("Home"):
         "keeps its estimated volatility within your budget, tilted by our house view: what company insiders do with their own "
         "money.</div>"
         f'<div class="home-chips">{chips}</div>'
-        '<div class="home-scroll">Scroll down for our view today and the five steps<b>↓</b></div>'
+        '<div class="home-scroll">Scroll down for our latest view and the five steps<b>↓</b></div>'
         "</div>", unsafe_allow_html=True)
-    home_live = st.container()   # "Our view today": filled further down, once the data and the signal are loaded
+    home_live = st.container()   # "Latest available view": filled further down, once the data and the signal are loaded
     steps = "".join(
         f'<div class="home-step"><div class="num">{num}</div><div class="name">{html.escape(tab)}</div>'
         f'<div class="text">{html.escape(text)}</div></div>' for num, tab, text in HOME_STEPS)
@@ -772,6 +773,9 @@ with tabs[2], guarded("Portfolio"):
                         f"{(res.volatility - bench_stats['volatility']) * 100:+.2f} pp vs benchmark", delta_color="inverse")
             c[2].metric("Sharpe ratio", f"{res.sharpe:.2f}", f"{res.sharpe - bench_stats['sharpe']:+.2f} vs benchmark")
             c[3].metric("Tracking error vs benchmark", pct(te, 2))
+            st.caption("Expected figures before the one-off cost of buying the portfolio from cash (about "
+                       f"{(w * universe.loc[w.index, 'tc_bps']).sum():.0f} bps of the amount invested, once). "
+                       "Trading costs at every rebalancing are deducted in the backtest.")
             comp = pd.DataFrame({"Portfolio": [res.expected_return, res.volatility, res.sharpe],
                                  bench_label(profile): [bench_stats["expected_return"], bench_stats["volatility"], bench_stats["sharpe"]],
                                  "SPY": [spy_stats["expected_return"], spy_stats["volatility"], spy_stats["sharpe"]]},
@@ -807,7 +811,7 @@ with tabs[2], guarded("Portfolio"):
                                line=dict(color=GREY, width=2, dash="dash")),
                     go.Scatter(x=front["volatility"] * 100, y=front["expected_return"] * 100,
                                name="With your constraints", line=dict(color=NAVY, width=3)),
-                    go.Scatter(x=cml_x * 100, y=cml_x * tangency["sharpe"] * 100, name="Capital market line",
+                    go.Scatter(x=cml_x * 100, y=cml_x * tangency["sharpe"] * 100, name="Theoretical allocation line",
                                line=dict(color=GOLD_COLOR, width=1.5, dash="dot")),
                     go.Scatter(x=[gmv["volatility"] * 100], y=[gmv["expected_return"] * 100], name="Minimum variance",
                                mode="markers", marker=dict(color="white", size=11, symbol="circle",
@@ -862,9 +866,11 @@ with tabs[2], guarded("Portfolio"):
                            f"minimum-variance portfolio, the least risk your constraints allow ({pct(gmv['volatility'])} "
                            f"volatility). The triangle is the maximum-Sharpe (tangency) portfolio: Sharpe ratio "
                            f"{tangency['sharpe']:.2f} at {pct(tangency['volatility'])} volatility, with "
-                           f"{pct(tangency['Equity'], 0)} in equities. The dotted capital market line starts at the T-bill "
-                           f"(the origin, since returns are measured above it) and touches the curve there: its slope is "
-                           f"the best Sharpe ratio available. {where}")
+                           f"{pct(tangency['Equity'], 0)} in equities. The dotted theoretical allocation line (the capital market "
+                           f"line) starts at the T-bill (the origin, since returns are measured above it) and touches the "
+                           f"curve there: its slope is the best Sharpe ratio available. It is a reference only: its "
+                           f"points mix the tangency portfolio with cash, or with borrowing beyond it, so most of them "
+                           f"break the client's rules (cash cap, bond floor, no leverage). {where}")
 
         with sub_alloc:
             b_eq = spec_p.benchmark_equity
@@ -999,7 +1005,8 @@ with tabs[2], guarded("Portfolio"):
 with home_live, guarded("Home"), st.container(key="home-stats"):
     # Only what is true before we know the client: the house view and the data. The client's own figures
     # (profile, expected return, volatility, mix) come after the questionnaire, in the Portfolio tab.
-    st.markdown('<div class="home-section">Our view today</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="home-section">Latest available view (data to {returns.index[-1]:%B %Y})</div>',
+                unsafe_allow_html=True)
     c = [col.container(border=True) for col in st.columns(4, gap="medium")]
     month, share, z = ins.signal_at(signal, returns.index[-1]) if signal is not None else (None, None, None)
     if z is None:
@@ -1104,13 +1111,13 @@ with tabs[3], guarded("Insider Signal"):
                    "spring 2020.")
 
         st.markdown("#### Did insider buying predict the market?")
-        bench_ex = (bench["SPY"] - rf.reindex(bench.index)).dropna()
-        evid = ins.market_evidence(signal, bench_ex)
+        spread = (bench["SPY"] - bench["AGG"]).dropna()    # the view is on SPY vs AGG, so the evidence is too
+        evid = ins.market_evidence(signal, spread)
         e1, e2 = st.columns([3, 2], gap="large")
         if len(evid):
             f = go.Figure(go.Bar(x=evid.index.astype(str), y=evid["next_return"] * 100, marker_color=NAVY,
                                  text=[f"{v:.1%}" for v in evid["next_return"]], textposition="outside"))
-            f.update_layout(title="SPY return above T-bill over the next 12 months, by insider-buying quintile",
+            f.update_layout(title="SPY return minus AGG return over the next 12 months, by insider-buying quintile",
                             xaxis_title="Months sorted by insider buying (z-score)", yaxis_title="% (average)")
             e1.plotly_chart(fig_layout(f, 380), width="stretch")
         if len(evid):
@@ -1119,12 +1126,15 @@ with tabs[3], guarded("Insider Signal"):
             e2.markdown(
                 f"Months are split into five equal groups by the insider signal ({int(evid['months'].sum())} months "
                 f"since {signal['z'].first_valid_index():%Y} with a known next year). After the fifth of months with "
-                f"the broadest insider buying, SPY beat the T-bill by **{top_ret:.0%}** over the next year on "
-                f"average, against **{rest_ret:.0%}** after the other months.\n\n"
-                "**Honest limits.** The effect is modest and noisy: the four other groups are not in order, and a "
-                "12-month regression gives a Newey-West t-statistic of about 2. Insiders also tend to buy early: "
-                "in spring 2008 they bought before the worst of the crisis. This is why the view only tilts the "
-                "portfolio, with a confidence you choose, and always within the volatility budget.")
+                f"the broadest insider buying, equities (SPY) beat bonds (AGG) by **{top_ret:.0%}** over the next "
+                f"year on average, against **{rest_ret:.0%}** after the other months: the comparison our view "
+                "makes.\n\n"
+                "**A hypothesis, not a proof.** The effect is modest and noisy: the four other groups are not in "
+                "order, and a 12-month regression gives a Newey-West t-statistic of about 2.2 (about 1.3 from "
+                "2012). These years overlap the backtest, so this is not an independent test. Insiders also tend "
+                "to buy early: in spring 2008 they bought before the worst of the crisis. This is why the view "
+                "only tilts the portfolio, with a confidence you choose, and always within the volatility "
+                "budget.")
 
         with st.expander("How the view enters the portfolio (Black-Litterman)"):
             st.markdown(
@@ -1311,12 +1321,20 @@ with tabs[5], guarded("Simulation"):
         years = st.slider("Horizon (years)", 5, 20, 10, key="sim.years")
         loss_limit = prof.MAX_LOSS_LEVELS[answers["max_loss"]]
         try:
-            sim, h_start, h_end, n_hist = simulate(profile, cons_json, st.session_state.get("bt.freq", "Quarterly"),
+            sim, h_start, h_end, n_hist, hist_return = simulate(profile, cons_json, st.session_state.get("bt.freq", "Quarterly"),
                                                    view_source, confidence, years, float(wealth), loss_limit)
         except EXPECTED_ERRORS as exc:
             st.error(f"The simulation could not run: {exc}")
             sim = None
         if sim is not None:
+            sim_label = f"Our strategy, {h_start:%Y}–{h_end:%Y} replayed"
+            st.info(f"**How to read these scenarios.** They replay what the strategy actually earned from "
+                    f"{h_start:%B %Y} to {h_end:%B %Y}: about {hist_return:.1%} a year after trading costs, a strong "
+                    "period for markets. That is not the forward-looking estimate of the Portfolio tab "
+                    f"({pct(res.expected_return)} a year above the T-bill, about "
+                    f"{res.expected_return + float(rf.iloc[-1]) * 12:.1%} in total at today's T-bill rate). The stock "
+                    "list is also made of today's winners (survivorship bias), so read these amounts as a favourable "
+                    "case, not a forecast.")
             year_col = f"Loss above {loss_limit:.0%} in a given year"
             dd_col, dd_bad_col = "Worst fall, typical", "Worst fall, bad case (5%)"
             var_col, es_col = "1-year VaR (95%)", "1-year expected shortfall (95%)"
@@ -1324,7 +1342,7 @@ with tabs[5], guarded("Simulation"):
                            year_col: v["prob_year_loss"], dd_col: v["dd_median"], dd_bad_col: v["dd_p5"],
                            var_col: v["year_var95"], es_col: v["year_es95"]}
                     for name, v in sim.items()}
-            table = pd.DataFrame(rows).T.rename(index={"Portfolio": "Recommended portfolio",
+            table = pd.DataFrame(rows).T.rename(index={"Portfolio": sim_label,
                                                        "Benchmark": bench_label(profile)})
             p_, b_ = sim["Portfolio"], sim["Benchmark"]
             c = st.columns(3) + st.columns(3)  # wealth on the first row, risk on the second
@@ -1372,7 +1390,7 @@ with tabs[5], guarded("Simulation"):
             for name, clr, fill in (("Benchmark", GREY, THEME["fill_bench"]), ("Portfolio", NAVY, THEME["fill_main"])):
                 b = sim[name]["bands"]
                 x = b.index / 12
-                label_ = "Recommended portfolio" if name == "Portfolio" else bench_label(profile)
+                label_ = sim_label if name == "Portfolio" else bench_label(profile)
                 f.add_trace(go.Scatter(x=x, y=b["p95"], line=dict(width=0), showlegend=False, hoverinfo="skip"))
                 f.add_trace(go.Scatter(x=x, y=b["p5"], fill="tonexty", fillcolor=fill, line=dict(width=0),
                                        name=f"{label_}: 5%-95% range"))
