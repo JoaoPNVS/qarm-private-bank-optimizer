@@ -46,7 +46,7 @@ def test_incompatible_constraints_show_message():
 def test_backtest_tab_annual_rebalancing():
     at = run_app({("selectbox", "bt.freq"): "Annual"})
     assert not at.exception and not at.error and not at.warning
-    assert any("Average estimated volatility at rebalancing" in c.value for c in at.caption)
+    assert any("average estimated volatility at rebalancing" in c.value for c in at.caption)
 
 
 def backtest_metrics(at):
@@ -301,6 +301,7 @@ def test_about_us_with_team_photos():
     assert len(cards) == 5 and any("Joao Neves" in c for c in cards)
     initials = [md.value for md in at.markdown if "border-radius:50%" in md.value and "<img" not in md.value]
     assert not initials                       # every member's photo is in assets/team/, so no initials avatar
+    assert any("with the help of Claude" in c.value for c in at.caption)   # AI disclosure
 
 
 def test_about_us_with_a_photo(tmp_path, monkeypatch):
@@ -331,7 +332,7 @@ def test_efficient_frontier_section():
     assert not at.exception and not at.error
     assert any(md.value == "### Efficient frontier" for md in at.markdown)
     assert any("theoretical allocation line" in c.value for c in at.caption)
-    assert any("maximum-Sharpe (tangency) portfolio" in c.value for c in at.caption)
+    assert any("also called the tangency portfolio" in c.value for c in at.caption)
     at = run_app({("selectbox", "profile"): "Dynamic", ("slider", "views_insider"): 0})
     assert not at.exception and not at.error
 
@@ -359,7 +360,7 @@ def test_insider_signal_tab():
     assert {"Insider buying breadth", "Signal", "Expected premium of equities over bonds",
             "Equities in the portfolio"} <= labels
     assert any("vs our stocks" in df.value.columns for df in at.dataframe)          # event study
-    assert any("Why we do not bet on individual stocks" in md.value for md in at.markdown)
+    assert any("Why we don't bet on individual stocks" in md.value for md in at.markdown)
     assert any("insider view" in c.value for c in at.caption)                       # Portfolio caption
 
 

@@ -280,7 +280,8 @@ Grading criteria (from the professor) — every feature should serve one of thes
   per team member. Team data lives in ONE editable file, `data/team.json` (name, role, description,
   photo path, LinkedIn; optional `repository` link). Photos go in `assets/team/`; a missing photo
   shows a round avatar with the initials (`src/team.py`). No e-mail addresses. Own texts and style,
-  nothing from reference/.
+  nothing from reference/. Ends with an AI disclosure (built with the help of Claude for the code and
+  first drafts of the texts; the team chose the strategy, made the decisions and checked every result): keep it.
 
 ## Code organisation
 ```

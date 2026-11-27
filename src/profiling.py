@@ -51,13 +51,13 @@ class Question:
 QUESTIONS = [
     Question("horizon", "When will you need most of this money?", "capacity",
              ("In less than 3 years", "In 3 to 5 years", "In 5 to 10 years", "In more than 10 years")),
-    Question("income", "How stable are your income and savings capacity?", "capacity",
-             ("Unstable, I may need to withdraw from this portfolio", "Rather stable, little saving",
-              "Stable, regular savings", "Very stable, large savings capacity")),
+    Question("income", "How stable are your income and your ability to save?", "capacity",
+             ("Unstable, I may need to take money out of this portfolio", "Fairly stable, I save a little",
+              "Stable, I save regularly", "Very stable, I save a lot")),
     Question("wealth_share", "What share of your total wealth does this portfolio represent?", "capacity",
              ("More than 75%", "50% to 75%", "25% to 50%", "Less than 25%")),
     Question("objective", "What is your main investment objective?", "willingness",
-             ("Preserve capital", "Regular income with limited fluctuations",
+             ("Preserve capital", "Regular income with small ups and downs",
               "Balanced growth of capital", "Maximise long-term growth")),
     Question("max_loss", "What is the largest loss over one year you could accept?", "willingness",
              ("5%", "10%", "20%", "More than 30%")),
@@ -65,8 +65,8 @@ QUESTIONS = [
              ("Sell everything", "Sell part of it", "Hold and wait", "Invest more")),
     Question("knowledge", "Which statement best describes your investment knowledge and experience?",
              "knowledge",
-             ("None", "Basic: savings accounts, some funds",
-              "Good: equities and bonds for several years", "Professional or extensive experience")),
+             ("None", "Basic (savings accounts, a few funds)",
+              "Good, I have held equities and bonds for several years", "Professional or extensive experience")),
 ]
 
 
@@ -97,16 +97,16 @@ def assess(answers: dict[str, int]) -> Assessment:
             for d in ("capacity", "willingness", "knowledge")}
     cap, will = _level(dims["capacity"]), _level(dims["willingness"])
     level = min(cap, will)
-    reasons = [f"Risk capacity score {dims['capacity']:.2f}/4 -> {PROFILES[cap]}.",
-               f"Risk willingness score {dims['willingness']:.2f}/4 -> {PROFILES[will]}.",
-               f"We keep the more prudent of the two: {PROFILES[level]}."]
+    reasons = [f"Risk capacity score {dims['capacity']:.2f}/4, which gives {PROFILES[cap]}.",
+               f"Risk willingness score {dims['willingness']:.2f}/4, which gives {PROFILES[will]}.",
+               f"We keep the more prudent of the two, {PROFILES[level]}."]
     cap_name = KNOWLEDGE_CAP.get(scores["knowledge"])
     if cap_name and level > PROFILES.index(cap_name):
         level = PROFILES.index(cap_name)
-        reasons.append(f"Limited investment knowledge: profile capped at {cap_name}.")
+        reasons.append(f"Your investment knowledge is limited, so the profile is capped at {cap_name}.")
     if answers["horizon"] == SHORT_HORIZON_ANSWER and level > 0:
         level = 0
-        reasons.append("Horizon below 3 years: the profile is Conservative whatever the other answers.")
+        reasons.append("Your horizon is under 3 years, so the profile is Conservative whatever your other answers.")
     return Assessment(PROFILES[level], scores, dims,
                       {"capacity": PROFILES[cap], "willingness": PROFILES[will]}, reasons)
 
@@ -130,12 +130,12 @@ class ProfileSpec:
 # Volatility cap = historical volatility of the profile benchmark (2003-10 to 2026-09) rounded up
 # to the next percent: 5.91 / 9.28 / 11.85 / 14.52% -> 6 / 10 / 12 / 15%, see src/benchmarks.py.
 SPECS = {
-    "Conservative": ProfileSpec("Conservative", "Capital preservation first; low fluctuations.", 0.06, 0.30,
+    "Conservative": ProfileSpec("Conservative", "Protect your capital first, with small ups and downs.", 0.06, 0.30,
                                 5.0, 0.90, 0.05),
-    "Balanced": ProfileSpec("Balanced", "Balance between growth and stability.", 0.10, 0.60, 6.0, 0.80, 0.10),
-    "Growth": ProfileSpec("Growth", "Long-term capital growth; accepts significant fluctuations.", 0.12, 0.80,
+    "Balanced": ProfileSpec("Balanced", "A balance between growth and stability.", 0.10, 0.60, 6.0, 0.80, 0.10),
+    "Growth": ProfileSpec("Growth", "Grow your capital over the long run, accepting large ups and downs.", 0.12, 0.80,
                           7.0, 0.70, 0.15),
-    "Dynamic": ProfileSpec("Dynamic", "Maximum long-term growth; accepts large drawdowns.", 0.15, 1.00,
+    "Dynamic": ProfileSpec("Dynamic", "The most long-term growth, accepting deep losses at times.", 0.15, 1.00,
                            8.0, 0.60, 0.20),
 }
 MAX_CASH = 0.10
