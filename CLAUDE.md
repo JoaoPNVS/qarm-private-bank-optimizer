@@ -210,8 +210,9 @@ Grading criteria (from the professor) — every feature should serve one of thes
   It has the same survivorship bias, so the comparison is free of it; but the gap is NOT the effect
   of the optimisation alone: the equal-weight portfolio also ignores the volatility budget and the
   bond-sleeve limits (its bonds: ~6.4y duration, ~15% high yield, ~85% IG with today's fund data,
-  outside the Conservative / Balanced limits). Backtest Sharpe: strategy below equal weight in
-  every profile (Balanced 1.05 vs 1.14), above the profile benchmark (0.84). Shown in every backtest table and chart, with a plain-language "How to read these
+  outside the Conservative / Balanced limits). Backtest Sharpe vs equal weight / profile benchmark:
+  Conservative 0.91 vs 0.86 / 0.64, Balanced 1.05 vs 1.14 / 0.84, Growth 1.07 vs 1.22 / 0.89, Dynamic
+  1.13 vs 1.26 / 0.92 (above equal weight only for Conservative, above the benchmark in every profile). Shown in every backtest table and chart, with a plain-language "How to read these
   results" box for the client.
 - **Simulation** (`src/risk.py`): Monte Carlo block bootstrap (12-month blocks, 5,000 paths,
   fixed seed) of the client's wealth over 5-20 years, starting from the client wealth. History =

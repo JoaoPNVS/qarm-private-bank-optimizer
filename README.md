@@ -93,9 +93,9 @@ network.
 - **Survivorship bias.** The stock list is today's index membership applied to the past, so
   companies that failed or left the indices are missing and the strategy's backtest and
   simulation are optimistic. SPY and the profile benchmarks are not affected.
-- **Equal weight.** The strategy does not beat the equal-weight portfolio of the same universe
-  (Balanced Sharpe 1.05 vs 1.14, every profile below it), a known result with short estimation
-  windows (DeMiguel, Garlappi and Uppal, 2009). The gap is not the effect of optimisation alone:
+- **Equal weight.** The strategy beats the equal-weight portfolio of the same universe only for
+  Conservative (Sharpe 0.91 vs 0.86); for Balanced, Growth and Dynamic it is below it (Balanced
+  1.05 vs 1.14), a known result with short estimation windows (DeMiguel, Garlappi and Uppal, 2009). The gap is not the effect of optimisation alone:
   equal weight ignores the volatility budget and the bond limits (its bonds average 6.4 years of
   duration and 15% high yield, beyond the Conservative and Balanced limits). The strategy does
   beat its profile benchmark (Balanced 1.05 vs 0.84).
