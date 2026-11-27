@@ -1111,13 +1111,13 @@ with tabs[3], guarded("Insider Signal"):
                    "spring 2020.")
 
         st.markdown("#### Did insider buying predict the market?")
-        spread = (bench["SPY"] - bench["AGG"]).dropna()    # the view is on SPY vs AGG, so the evidence is too
-        evid = ins.market_evidence(signal, spread)
+        # the view is on SPY vs AGG, so the evidence is too: each 12-month return compounded, then subtracted
+        evid = ins.market_evidence(signal, bench["SPY"].dropna(), bench["AGG"])
         e1, e2 = st.columns([3, 2], gap="large")
         if len(evid):
             f = go.Figure(go.Bar(x=evid.index.astype(str), y=evid["next_return"] * 100, marker_color=NAVY,
                                  text=[f"{v:.1%}" for v in evid["next_return"]], textposition="outside"))
-            f.update_layout(title="SPY return minus AGG return over the next 12 months, by insider-buying quintile",
+            f.update_layout(title="SPY's return over the next 12 months minus AGG's, by insider-buying quintile",
                             xaxis_title="Months sorted by insider buying (z-score)", yaxis_title="% (average)")
             e1.plotly_chart(fig_layout(f, 380), width="stretch")
         if len(evid):
@@ -1130,7 +1130,7 @@ with tabs[3], guarded("Insider Signal"):
                 f"year on average, against **{rest_ret:.0%}** after the other months: the comparison our view "
                 "makes.\n\n"
                 "**A hypothesis, not a proof.** The effect is modest and noisy: the four other groups are not in "
-                "order, and a 12-month regression gives a Newey-West t-statistic of about 2.2 (about 1.3 from "
+                "order, and a 12-month regression gives a Newey-West t-statistic of about 2.3 (about 1.4 from "
                 "2012). These years overlap the backtest, so this is not an independent test. Insiders also tend "
                 "to buy early: in spring 2008 they bought before the worst of the crisis. This is why the view "
                 "only tilts the portfolio, with a confidence you choose, and always within the volatility "
@@ -1328,9 +1328,9 @@ with tabs[5], guarded("Simulation"):
             sim = None
         if sim is not None:
             sim_label = f"Our strategy, {h_start:%Y}–{h_end:%Y} replayed"
-            st.info(f"**How to read these scenarios.** They replay what the strategy actually earned from "
-                    f"{h_start:%B %Y} to {h_end:%B %Y}: about {hist_return:.1%} a year after trading costs, a strong "
-                    "period for markets. That is not the forward-looking estimate of the Portfolio tab "
+            st.info(f"**How to read these scenarios.** They replay the strategy's backtested returns from "
+                    f"{h_start:%B %Y} to {h_end:%B %Y}: about {hist_return:.1%} a year after trading costs, in a "
+                    "strong period for markets. A backtest, not a performance actually earned by clients. That is not the forward-looking estimate of the Portfolio tab "
                     f"({pct(res.expected_return)} a year above the T-bill, about "
                     f"{res.expected_return + float(rf.iloc[-1]) * 12:.1%} in total at today's T-bill rate). The stock "
                     "list is also made of today's winners (survivorship bias), so read these amounts as a favourable "

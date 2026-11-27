@@ -48,7 +48,8 @@ The "About Us" button (top right) presents the project and the team.
   (capped at ±2) gives one view: SPY beats AGG by the equilibrium spread + 2% × z.
   - *Evidence:* breadth peaked at the market lows of 2008–09, 2011 and 2020. After the fifth of
     months with the broadest buying, SPY beat AGG (the comparison the view makes) by about 18%
-    over the next year, against about 11% otherwise; Newey-West t about 2.2 (1.3 from 2012). A
+    over the next year (12-month returns compounded, then subtracted), against about 11%
+    otherwise; Newey-West t about 2.3 (1.4 from 2012). A
     hypothesis, not a proof: modest, noisy and measured on years that overlap the backtest.
     Purchases in single large companies showed no edge, so they are displayed but not used.
   - *Backtest (May 2012 – Sep 2026) against no view:* slightly higher Sharpe in every profile
@@ -72,7 +73,7 @@ The "About Us" button (top right) presents the project and the team.
   equal-weight portfolio of the same stocks and bond funds.
 - **Simulation.** 5,000 paths of random 12-month blocks of the strategy's out-of-sample backtest
   returns, with the benchmark on the same blocks. It replays what the strategy earned in 2012–2026
-  (about 12.7% a year for Balanced, a strong period), not the forward-looking expected return of
+  (backtested, about 12.7% a year for Balanced, a strong period), not the forward-looking expected return of
   the Portfolio tab, so its amounts are a favourable case. Risk shown as the chance of a one-year loss
   above the client's stated limit, the worst fall from a peak, and one-year VaR and expected
   shortfall at 95%.
